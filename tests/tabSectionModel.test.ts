@@ -115,4 +115,46 @@ describe("tabSectionModel", () => {
     ]);
     expect(nextState.sections["secondary-tabs"]?.focusedTabId).toBe("graph");
   });
+
+  test("移动 tab 时应保留 type 与 payload 等纯数据字段", () => {
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [
+          {
+            id: "welcome",
+            title: "Welcome",
+            type: "welcome",
+            payload: {
+              headline: "Workspace Overview",
+              items: ["recent", "pinned"],
+            },
+            content: "Welcome card",
+          },
+        ],
+        focusedTabId: "welcome",
+      },
+      {
+        id: "secondary-tabs",
+        tabs: [],
+        focusedTabId: null,
+      },
+    ]);
+
+    const nextState = moveTabSectionTab(state, {
+      sourceSectionId: "main-tabs",
+      targetSectionId: "secondary-tabs",
+      tabId: "welcome",
+      targetIndex: 0,
+    });
+
+    expect(nextState.sections["secondary-tabs"]?.tabs[0]).toMatchObject({
+      id: "welcome",
+      type: "welcome",
+      payload: {
+        headline: "Workspace Overview",
+        items: ["recent", "pinned"],
+      },
+    });
+  });
 });

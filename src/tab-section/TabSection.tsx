@@ -22,6 +22,8 @@
  *   />
  *
  * @exports
+ *   - TabSectionContentRenderer   tab 内容渲染函数签名
+ *   - TabSectionContentRendererRegistry tab 内容渲染注册表
  *   - TabSectionSplitSide         content 分区预览方位
  *   - TabSectionHoverTarget       当前 hover 目标
  *   - TabSectionPointerPressPayload pointer 按下载荷
@@ -29,168 +31,54 @@
  *   - TabSection                  组件本体
  */
 
-import { useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  arePreviewHoverTargetsEqual,
+  resolvePreviewAnchorLeafSectionId,
+  resolvePreviewContentSession,
+  resolvePreviewSplitSide,
+  isPointerInsidePreviewBounds,
+  type PreviewHoverTargetBase,
+} from "../section/previewSession";
+import {
+  type TabSectionDragSession,
+  type TabSectionHoverTarget,
+  type TabSectionPointerPressPayload,
+  type TabSectionSplitSide,
+} from "./tabSectionDrag";
 import { type TabSectionStateItem, type TabSectionTabDefinition, type TabSectionTabMove } from "./tabSectionModel";
 import "./tabSection.css";
 
-/**
- * @type TabSectionSplitSide
- * @description content 分区预览方位。
- */
-export type TabSectionSplitSide = "left" | "right" | "top" | "bottom";
+export type {
+  TabSectionDragSession,
+  TabSectionHoverTarget,
+  TabSectionPointerPressPayload,
+  TabSectionSplitSide,
+} from "./tabSectionDrag";
 
 /**
- * @interface TabSectionHoverTarget
- * @description 当前拖拽 hover 到的 tab section 目标。
- * @field area          - hover 区域：strip 或 content。
- * @field leafSectionId - 实际 leaf section 标识。
- * @field tabSectionId  - 逻辑 tab section 标识。
- * @field targetIndex   - strip 区域内的目标插入索引。
- * @field splitSide     - content 区域内的预览分区方位。
+ * @type TabSectionContentRenderer
+ * @description 单个 tab 内容渲染函数。
  */
-export interface TabSectionHoverTarget {
-  /** hover 区域。 */
-  area: "strip" | "content";
-  /** 当前渲染树中的 leaf section 标识。 */
-  leafSectionId: string;
-  /** 在 committed 布局中作为命中基准的 leaf section 标识。 */
-  anchorLeafSectionId?: string;
-  /** 逻辑 tab section 标识。 */
-  tabSectionId: string;
-  /** strip 区域内的目标插入索引。 */
-  targetIndex?: number;
-  /** content 区域内的预览分区方位。 */
-  splitSide?: TabSectionSplitSide | null;
-  /** content 区域命中判断使用的稳定边界。 */
-  contentBounds?: {
-    left: number;
-    top: number;
-    right: number;
-    bottom: number;
-    width: number;
-    height: number;
-  };
-}
+export type TabSectionContentRenderer = (tab: TabSectionTabDefinition) => ReactNode;
 
 /**
- * @interface TabSectionStableBounds
- * @description 用于维持 split hover 稳定性的边界信息。
- * @field left   - 左边界。
- * @field top    - 上边界。
- * @field right  - 右边界。
- * @field bottom - 下边界。
- * @field width  - 宽度。
- * @field height - 高度。
+ * @type TabSectionContentRendererRegistry
+ * @description 基于 tab.type 分发的内容渲染注册表。
  */
-interface TabSectionStableBounds {
-  /** 左边界。 */
-  left: number;
-  /** 上边界。 */
-  top: number;
-  /** 右边界。 */
-  right: number;
-  /** 下边界。 */
-  bottom: number;
-  /** 宽度。 */
-  width: number;
-  /** 高度。 */
-  height: number;
-}
-
-/**
- * @interface TabSectionPointerPressPayload
- * @description tab pointer 按下时的载荷。
- * @field leafSectionId - 当前 leaf section 标识。
- * @field tabSectionId  - 当前逻辑 tab section 标识。
- * @field tabId         - 当前 tab 标识。
- * @field index         - tab 当前索引。
- * @field pointerId     - pointer 标识。
- * @field clientX       - 按下横坐标。
- * @field clientY       - 按下纵坐标。
- * @field title         - tab 标题快照。
- * @field content       - card 内容快照。
- * @field tone          - card 语义色快照。
- */
-export interface TabSectionPointerPressPayload {
-  /** 当前 leaf section 标识。 */
-  leafSectionId: string;
-  /** 当前逻辑 tab section 标识。 */
-  tabSectionId: string;
-  /** 当前 tab 标识。 */
-  tabId: string;
-  /** tab 当前索引。 */
-  index: number;
-  /** pointer 标识。 */
-  pointerId: number;
-  /** 按下横坐标。 */
-  clientX: number;
-  /** 按下纵坐标。 */
-  clientY: number;
-  /** tab 标题快照。 */
-  title: string;
-  /** card 内容快照。 */
-  content: string;
-  /** card 语义色快照。 */
-  tone?: TabSectionTabDefinition["tone"];
-}
-
-/**
- * @interface TabSectionDragSession
- * @description tab section 的全局拖拽会话。
- * @field sourceTabSectionId  - 拖拽起始 tab section。
- * @field currentTabSectionId - tab 当前所在 tab section。
- * @field sourceLeafSectionId - 拖拽起始 leaf section。
- * @field currentLeafSectionId - tab 当前所在 leaf section。
- * @field tabId               - 被拖拽 tab。
- * @field title               - tab 标题快照。
- * @field content             - card 内容快照。
- * @field tone                - card 语义色快照。
- * @field pointerId           - pointer 标识。
- * @field originX             - 初始横坐标。
- * @field originY             - 初始纵坐标。
- * @field pointerX            - 当前横坐标。
- * @field pointerY            - 当前纵坐标。
- * @field phase               - 拖拽阶段。
- * @field hoverTarget         - 当前 hover 目标。
- */
-export interface TabSectionDragSession {
-  /** 拖拽起始 tab section。 */
-  sourceTabSectionId: string;
-  /** tab 当前所在 tab section。 */
-  currentTabSectionId: string;
-  /** 拖拽起始 leaf section。 */
-  sourceLeafSectionId: string;
-  /** tab 当前所在 leaf section。 */
-  currentLeafSectionId: string;
-  /** 被拖拽 tab。 */
-  tabId: string;
-  /** tab 标题快照。 */
-  title: string;
-  /** card 内容快照。 */
-  content: string;
-  /** card 语义色快照。 */
-  tone?: TabSectionTabDefinition["tone"];
-  /** pointer 标识。 */
-  pointerId: number;
-  /** 初始横坐标。 */
-  originX: number;
-  /** 初始纵坐标。 */
-  originY: number;
-  /** 当前横坐标。 */
-  pointerX: number;
-  /** 当前纵坐标。 */
-  pointerY: number;
-  /** 拖拽阶段。 */
-  phase: "pending" | "dragging";
-  /** 当前 hover 目标。 */
-  hoverTarget: TabSectionHoverTarget | null;
-}
+export type TabSectionContentRendererRegistry = Record<string, TabSectionContentRenderer>;
 
 /**
  * @constant TAB_STRIP_HYSTERESIS_PX
  * @description 相邻 tab 落点切换时的滞回范围。
  */
 const TAB_STRIP_HYSTERESIS_PX = 8;
+
+/**
+ * @constant DRAG_START_DISTANCE_PX
+ * @description 从按下进入真正拖拽前需要越过的最小位移。
+ */
+const DRAG_START_DISTANCE_PX = 4;
 
 /**
  * @function buildTabSectionDragSession
@@ -216,7 +104,13 @@ function buildTabSectionDragSession(
     pointerX: payload.clientX,
     pointerY: payload.clientY,
     phase: "pending",
-    hoverTarget: null,
+    hoverTarget: {
+      area: "strip",
+      leafSectionId: payload.leafSectionId,
+      anchorLeafSectionId: payload.leafSectionId,
+      tabSectionId: payload.tabSectionId,
+      targetIndex: payload.index,
+    },
   };
 }
 
@@ -312,101 +206,9 @@ function getTabTargetIndexFromPointer(
  * @param pointerY 当前纵坐标。
  * @returns 命中的预览分区；位于中央区域时返回 null。
  */
-function resolveContentSplitSide(
-  rect: DOMRect,
-  pointerX: number,
-  pointerY: number,
-): TabSectionSplitSide | null {
-  const leftThreshold = rect.left + rect.width / 3;
-  const rightThreshold = rect.right - rect.width / 3;
-  const topThreshold = rect.top + rect.height / 3;
-  const bottomThreshold = rect.bottom - rect.height / 3;
 
-  if (pointerX <= leftThreshold) {
-    return "left";
-  }
-
-  if (pointerX >= rightThreshold) {
-    return "right";
-  }
-
-  if (pointerY <= topThreshold) {
-    return "top";
-  }
-
-  if (pointerY >= bottomThreshold) {
-    return "bottom";
-  }
-
-  return null;
-}
-
-/**
- * @function isPointerInsideBounds
- * @description 判断 pointer 是否仍位于给定稳定边界内。
- * @param bounds 稳定边界。
- * @param pointerX 当前横坐标。
- * @param pointerY 当前纵坐标。
- * @returns 位于边界内时返回 true。
- */
-function isPointerInsideBounds(
-  bounds: TabSectionStableBounds | null,
-  pointerX: number,
-  pointerY: number,
-): boolean {
-  return Boolean(
-    bounds &&
-    pointerX >= bounds.left &&
-    pointerX <= bounds.right &&
-    pointerY >= bounds.top &&
-    pointerY <= bounds.bottom,
-  );
-}
-
-/**
- * @function toStableBounds
- * @description 将 DOMRect 转为可持久化的稳定边界对象。
- * @param rect DOMRect 或 null。
- * @returns 稳定边界对象；未命中时返回 null。
- */
-function toStableBounds(rect: DOMRect | null): TabSectionStableBounds | null {
-  if (!rect) {
-    return null;
-  }
-
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
-/**
- * @function areHoverTargetsEqual
- * @description 判断两个 hover 目标是否等价。
- * @param left 左侧目标。
- * @param right 右侧目标。
- * @returns 等价时返回 true。
- */
-function areHoverTargetsEqual(
-  left: TabSectionHoverTarget | null,
-  right: TabSectionHoverTarget | null,
-): boolean {
-  return (
-    left?.area === right?.area &&
-    left?.leafSectionId === right?.leafSectionId &&
-    left?.anchorLeafSectionId === right?.anchorLeafSectionId &&
-    left?.tabSectionId === right?.tabSectionId &&
-    left?.targetIndex === right?.targetIndex &&
-    left?.splitSide === right?.splitSide &&
-    left?.contentBounds?.left === right?.contentBounds?.left &&
-    left?.contentBounds?.top === right?.contentBounds?.top &&
-    left?.contentBounds?.right === right?.contentBounds?.right &&
-    left?.contentBounds?.bottom === right?.contentBounds?.bottom
-  );
+function getTabSectionHoverTargetId(target: PreviewHoverTargetBase<"strip" | "content", TabSectionSplitSide> & { tabSectionId?: string }): string {
+  return target.tabSectionId ?? "";
 }
 
 /**
@@ -424,6 +226,31 @@ function getCardToneClassName(tone: TabSectionTabDefinition["tone"]): string {
 }
 
 /**
+ * @function resolveTabCardBody
+ * @description 解析当前 tab 的主体内容。
+ *   优先使用 renderTabContent，其次使用按 type 分发的 registry，最后回退到字符串 content。
+ * @param tab 当前 tab。
+ * @param renderTabContent 显式内容渲染函数。
+ * @param contentRegistry 基于 tab.type 的注册表。
+ * @returns 渲染结果。
+ */
+function resolveTabCardBody(
+  tab: TabSectionTabDefinition,
+  renderTabContent?: TabSectionContentRenderer,
+  contentRegistry?: TabSectionContentRendererRegistry,
+): ReactNode {
+  if (renderTabContent) {
+    return renderTabContent(tab);
+  }
+
+  if (tab.type && contentRegistry?.[tab.type]) {
+    return contentRegistry[tab.type](tab);
+  }
+
+  return tab.content;
+}
+
+/**
  * @function TabSection
  * @description 渲染单个 tab section。
  * @param props 组件属性。
@@ -434,9 +261,13 @@ export function TabSection(props: {
   committedLeafSectionId: string;
   tabSectionId: string;
   tabSection: TabSectionStateItem | null;
-  dragSession: TabSectionDragSession | null;
+  dragSession?: TabSectionDragSession | null;
   interactive?: boolean;
-  onDragSessionChange: (session: TabSectionDragSession | null) => void;
+  allowContentPreview?: boolean;
+  contentRegistry?: TabSectionContentRendererRegistry;
+  renderTabContent?: TabSectionContentRenderer;
+  onDragSessionChange?: (session: TabSectionDragSession | null) => void;
+  onDragSessionEnd?: (session: TabSectionDragSession) => void;
   onFocusTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onMoveTab: (move: TabSectionTabMove) => void;
@@ -446,18 +277,29 @@ export function TabSection(props: {
     committedLeafSectionId,
     tabSectionId,
     tabSection,
-    dragSession,
+    dragSession: controlledDragSession,
     interactive = true,
+    allowContentPreview = false,
+    contentRegistry,
+    renderTabContent,
     onDragSessionChange,
+    onDragSessionEnd,
     onFocusTab,
     onCloseTab,
     onMoveTab,
   } = props;
+  const [internalDragSession, setInternalDragSession] = useState<TabSectionDragSession | null>(null);
   const sectionRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previousSlotLeftsRef = useRef<Record<string, number>>({});
+  const hoverTargetClearFrameRef = useRef<number>(0);
+  const dragSession = controlledDragSession ?? internalDragSession;
+  const dragSessionRef = useRef<TabSectionDragSession | null>(dragSession);
+  const updateDragSession = onDragSessionChange ?? setInternalDragSession;
+
+  dragSessionRef.current = dragSession;
 
   if (!tabSection) {
     console.warn("[layout-v2] tab section state is missing", {
@@ -468,14 +310,123 @@ export function TabSection(props: {
   }
 
   const activeCard = tabSection.tabs.find((tab) => tab.id === tabSection.focusedTabId) ?? null;
+  const sectionOwnsDraggedTab = Boolean(
+    dragSession && tabSection.tabs.some((tab) => tab.id === dragSession.tabId),
+  );
   const draggingTabId = dragSession?.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
+  const canPreviewRetargetContent = Boolean(
+    allowContentPreview &&
+    dragSession &&
+    !tabSection.tabs.some((tab) => tab.id === dragSession.tabId),
+  );
   const shouldHideActiveCard = Boolean(
     dragSession?.phase === "dragging" &&
     activeCard &&
     activeCard.id === dragSession.tabId,
   );
+
+  useEffect(() => {
+    if (!dragSession || !sectionOwnsDraggedTab) {
+      return;
+    }
+    const currentDragSession: TabSectionDragSession = dragSession;
+    let pendingEvent: PointerEvent | null = null;
+    let frameId = 0;
+
+    function flushPointerMove(): TabSectionDragSession | null {
+      frameId = 0;
+      const event = pendingEvent;
+      pendingEvent = null;
+      if (!event) {
+        return dragSessionRef.current;
+      }
+
+      const baseSession = dragSessionRef.current ?? currentDragSession;
+
+      const distance = Math.hypot(
+        event.clientX - baseSession.originX,
+        event.clientY - baseSession.originY,
+      );
+      const nextPhase = baseSession.phase === "pending" && distance >= DRAG_START_DISTANCE_PX
+        ? "dragging"
+        : baseSession.phase;
+
+      if (
+        nextPhase === baseSession.phase &&
+        baseSession.pointerX === event.clientX &&
+        baseSession.pointerY === event.clientY
+      ) {
+        return baseSession;
+      }
+
+      const nextSession: TabSectionDragSession = {
+        ...baseSession,
+        phase: nextPhase,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+      };
+      dragSessionRef.current = nextSession;
+      updateDragSession(nextSession);
+      return nextSession;
+    }
+
+    function handlePointerMove(event: PointerEvent): void {
+      const baseSession = dragSessionRef.current ?? currentDragSession;
+      if (event.pointerId !== baseSession.pointerId) {
+        return;
+      }
+
+      pendingEvent = event;
+      if (!frameId) {
+        frameId = window.requestAnimationFrame(flushPointerMove);
+      }
+    }
+
+    function handlePointerEnd(event: PointerEvent): void {
+      const baseSession = dragSessionRef.current ?? currentDragSession;
+      if (event.pointerId !== baseSession.pointerId) {
+        return;
+      }
+
+      let finalSession = dragSessionRef.current ?? currentDragSession;
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+        finalSession = flushPointerMove() ?? finalSession;
+      }
+
+      dragSessionRef.current = null;
+      updateDragSession(null);
+
+      if (finalSession?.phase === "dragging") {
+        onDragSessionEnd?.(finalSession);
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, [dragSession, onDragSessionEnd, sectionOwnsDraggedTab, updateDragSession]);
+
+  useEffect(() => {
+    document.body.classList.toggle("layout-v2--dragging", dragSession?.phase === "dragging");
+
+    return () => {
+      if (dragSession?.phase === "dragging") {
+        document.body.classList.remove("layout-v2--dragging");
+      }
+    };
+  }, [dragSession?.phase]);
 
   useLayoutEffect(() => {
     const nextSlotLefts: Record<string, number> = {};
@@ -515,31 +466,29 @@ export function TabSection(props: {
   }, [dragSession?.phase, tabSection.tabs]);
 
   useEffect(() => {
-    if (!interactive || !dragSession || dragSession.phase !== "dragging") {
+    if ((!interactive && !canPreviewRetargetContent) || !dragSession || dragSession.phase !== "dragging") {
+      if (hoverTargetClearFrameRef.current) {
+        window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+        hoverTargetClearFrameRef.current = 0;
+      }
       return;
     }
 
     const stripRect = stripRef.current?.getBoundingClientRect() ?? null;
     const contentRect = contentRef.current?.getBoundingClientRect() ?? null;
-    const existingContentBounds = (
+    const isCurrentSectionContentTarget = Boolean(
       dragSession.hoverTarget?.area === "content" &&
-      dragSession.hoverTarget.tabSectionId === tabSection.id &&
-      dragSession.hoverTarget.contentBounds
-    )
-      ? dragSession.hoverTarget.contentBounds
-      : null;
-    const contentBounds = existingContentBounds ?? toStableBounds(contentRect);
-    const shouldPreferStableContentTarget = Boolean(
-      dragSession.hoverTarget?.area === "content" &&
-      dragSession.hoverTarget.tabSectionId === tabSection.id &&
-      dragSession.hoverTarget.splitSide &&
-      isPointerInsideBounds(
-        dragSession.hoverTarget.contentBounds ?? contentBounds,
-        dragSession.pointerX,
-        dragSession.pointerY,
-      ),
+      dragSession.hoverTarget.tabSectionId === tabSection.id,
     );
+    const { contentBounds, shouldPreferStableContentTarget } = resolvePreviewContentSession({
+      currentTarget: dragSession.hoverTarget,
+      isCurrentSectionContentTarget,
+      contentRect,
+      pointerX: dragSession.pointerX,
+      pointerY: dragSession.pointerY,
+    });
     const insideStrip = Boolean(
+      interactive &&
       !shouldPreferStableContentTarget &&
       stripRect &&
       dragSession.pointerX >= stripRect.left &&
@@ -547,13 +496,17 @@ export function TabSection(props: {
       dragSession.pointerY >= stripRect.top &&
       dragSession.pointerY <= stripRect.bottom,
     );
-    const insideContent = isPointerInsideBounds(
+    const insideContent = isPointerInsidePreviewBounds(
       contentBounds,
       dragSession.pointerX,
       dragSession.pointerY,
     );
 
     if (insideStrip) {
+      if (hoverTargetClearFrameRef.current) {
+        window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+        hoverTargetClearFrameRef.current = 0;
+      }
       const targetIndex = getTabTargetIndexFromPointer(
         dragSession.pointerX,
         slotRefs.current,
@@ -583,7 +536,7 @@ export function TabSection(props: {
           tabId: dragSession.tabId,
           targetIndex,
         });
-        onDragSessionChange({
+        updateDragSession({
           ...dragSession,
           currentTabSectionId: tabSection.id,
           currentLeafSectionId: leafSectionId,
@@ -594,25 +547,35 @@ export function TabSection(props: {
     }
 
     if (insideContent && contentBounds) {
+      if (hoverTargetClearFrameRef.current) {
+        window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+        hoverTargetClearFrameRef.current = 0;
+      }
       const nextTarget: TabSectionHoverTarget = {
         area: "content",
         leafSectionId,
-        anchorLeafSectionId:
-          dragSession.hoverTarget?.area === "content" &&
-          dragSession.hoverTarget.tabSectionId === tabSection.id
-            ? dragSession.hoverTarget.anchorLeafSectionId ?? dragSession.hoverTarget.leafSectionId
-            : committedLeafSectionId,
+        anchorLeafSectionId: resolvePreviewAnchorLeafSectionId({
+          currentTarget: dragSession.hoverTarget,
+          isCurrentSectionContentTarget,
+          committedLeafSectionId,
+        }),
         tabSectionId: tabSection.id,
-        splitSide: resolveContentSplitSide(
-          contentBounds as DOMRect,
+        splitSide: resolvePreviewSplitSide(
+          contentBounds,
           dragSession.pointerX,
           dragSession.pointerY,
+          {
+            left: "left",
+            right: "right",
+            top: "top",
+            bottom: "bottom",
+          } as const,
         ),
         contentBounds,
       };
 
-      if (!areHoverTargetsEqual(dragSession.hoverTarget, nextTarget)) {
-        onDragSessionChange({
+      if (!arePreviewHoverTargetsEqual(dragSession.hoverTarget, nextTarget, getTabSectionHoverTargetId)) {
+        updateDragSession({
           ...dragSession,
           hoverTarget: nextTarget,
         });
@@ -621,17 +584,35 @@ export function TabSection(props: {
     }
 
     if (dragSession.hoverTarget?.leafSectionId === leafSectionId) {
-      onDragSessionChange({
-        ...dragSession,
-        hoverTarget: null,
-      });
+      if (!hoverTargetClearFrameRef.current) {
+        hoverTargetClearFrameRef.current = window.requestAnimationFrame(() => {
+          hoverTargetClearFrameRef.current = 0;
+          const latestSession = dragSessionRef.current;
+          if (!latestSession || latestSession.hoverTarget?.leafSectionId !== leafSectionId) {
+            return;
+          }
+
+          updateDragSession({
+            ...latestSession,
+            hoverTarget: null,
+          });
+        });
+      }
     }
+
+    return () => {
+      if (hoverTargetClearFrameRef.current) {
+        window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+        hoverTargetClearFrameRef.current = 0;
+      }
+    };
   }, [
     dragSession,
     interactive,
+    canPreviewRetargetContent,
     committedLeafSectionId,
     leafSectionId,
-    onDragSessionChange,
+    updateDragSession,
     onMoveTab,
     tabSection.id,
     tabSection.tabs,
@@ -644,7 +625,7 @@ export function TabSection(props: {
     dragSession.hoverTarget.tabSectionId === tabSection.id,
   );
   const pointerInsideContent = Boolean(
-    interactive &&
+    (interactive || canPreviewRetargetContent) &&
     dragSession?.phase === "dragging" &&
     dragSession.hoverTarget?.area === "content" &&
     dragSession.hoverTarget.tabSectionId === tabSection.id &&
@@ -686,7 +667,9 @@ export function TabSection(props: {
                       return;
                     }
 
-                    onDragSessionChange(buildTabSectionDragSession({
+                    onFocusTab(tab.id);
+                    event.preventDefault();
+                    updateDragSession(buildTabSectionDragSession({
                       leafSectionId,
                       tabSectionId: tabSection.id,
                       tabId: tab.id,
@@ -729,7 +712,7 @@ export function TabSection(props: {
         {activeCard && !shouldHideActiveCard ? (
           <div className={["layout-v2-tab-section__card", getCardToneClassName(activeCard.tone)].join(" ")}>
             <div className="layout-v2-tab-section__card-title">{activeCard.title}</div>
-            <div className="layout-v2-tab-section__card-body">{activeCard.content}</div>
+            <div className="layout-v2-tab-section__card-body">{resolveTabCardBody(activeCard, renderTabContent, contentRegistry)}</div>
           </div>
         ) : (
           <div className="layout-v2-tab-section__empty-card">Drop tab or focus another tab</div>

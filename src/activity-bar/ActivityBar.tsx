@@ -23,50 +23,22 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import {
   ActivityBarIcon,
-  type ActivityBarDragPayload,
   type ActivityBarPointerPressPayload,
 } from "./ActivityBarIcon";
+import { type PanelSectionDragSession } from "../panel-section/panelSectionDrag";
+import { type ActivityBarDragSession } from "./activityBarDrag";
 import {
   type ActivityBarIconMove,
   type ActivityBarStateItem,
 } from "./activityBarModel";
 import "./activityBar.css";
 
-/**
- * @interface ActivityBarDragSession
- * @description 当前 activity bar 的 pointer 拖拽会话。
- * @extends ActivityBarDragPayload
- * @field currentBarId - 当前 icon 所在的 activity bar。
- * @field pointerId    - 活动 pointer 标识。
- * @field originX      - 初始按下横坐标。
- * @field originY      - 初始按下纵坐标。
- * @field pointerX     - 当前 pointer 横坐标。
- * @field pointerY     - 当前 pointer 纵坐标。
- * @field targetIndex  - icon 当前落位索引。
- * @field phase        - 拖拽阶段：pending 或 dragging。
- */
-export interface ActivityBarDragSession extends ActivityBarDragPayload {
-  /** 当前 icon 所在的 activity bar。 */
-  currentBarId: string;
-  /** 活动 pointer 标识。 */
-  pointerId: number;
-  /** 初始按下横坐标。 */
-  originX: number;
-  /** 初始按下纵坐标。 */
-  originY: number;
-  /** 当前 pointer 横坐标。 */
-  pointerX: number;
-  /** 当前 pointer 纵坐标。 */
-  pointerY: number;
-  /** icon 当前落位索引。 */
-  targetIndex: number;
-  /** 拖拽阶段。 */
-  phase: "pending" | "dragging";
-}
+export type { ActivityBarDragSession } from "./activityBarDrag";
 
 /**
  * @constant POINTER_TARGET_HYSTERESIS_PX
@@ -75,6 +47,12 @@ export interface ActivityBarDragSession extends ActivityBarDragPayload {
  *   才允许目标索引在相邻位置之间切换，避免边界来回抖动。
  */
 const POINTER_TARGET_HYSTERESIS_PX = 6;
+
+/**
+ * @constant DRAG_START_DISTANCE_PX
+ * @description 从按下进入真正拖拽前需要越过的最小位移。
+ */
+const DRAG_START_DISTANCE_PX = 4;
 
 /**
  * @function readElementTranslateY
@@ -124,6 +102,7 @@ function buildDragSessionFromPress(
     sourceBarId: payload.sourceBarId,
     iconId: payload.iconId,
     currentBarId: payload.sourceBarId,
+    panelTarget: null,
     pointerId: payload.pointerId,
     originX: payload.clientX,
     originY: payload.clientY,
@@ -196,16 +175,34 @@ function getTargetIndexFromPointer(
  */
 export function ActivityBar(props: {
   bar: ActivityBarStateItem | null;
-  dragSession: ActivityBarDragSession | null;
-  onDragSessionChange: (session: ActivityBarDragSession | null) => void;
+  dragSession?: ActivityBarDragSession | null;
+  panelDragSession?: PanelSectionDragSession | null;
+  onDragSessionChange?: (session: ActivityBarDragSession | null) => void;
+  onDragSessionEnd?: (session: ActivityBarDragSession) => void;
+  onPanelDragSessionChange?: (session: PanelSectionDragSession | null) => void;
+  onActivateIcon?: (iconId: string) => void;
   onSelectIcon: (iconId: string) => void;
   onMoveIcon: (move: ActivityBarIconMove) => void;
 }): ReactNode {
-  const { bar, dragSession, onDragSessionChange, onSelectIcon, onMoveIcon } = props;
+  const {
+    bar,
+    dragSession: controlledDragSession,
+    panelDragSession,
+    onDragSessionChange,
+    onDragSessionEnd,
+    onPanelDragSessionChange,
+    onActivateIcon,
+    onSelectIcon,
+    onMoveIcon,
+  } = props;
+  const [internalDragSession, setInternalDragSession] = useState<ActivityBarDragSession | null>(null);
   const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRef = useRef<HTMLDivElement | null>(null);
   const previousSlotTopsRef = useRef<Record<string, number>>({});
   const processedPointerKeyRef = useRef<string | null>(null);
+  const dragSession = controlledDragSession ?? internalDragSession;
+  const updateDragSession = onDragSessionChange ?? setInternalDragSession;
+  const updatePanelDragSession = onPanelDragSessionChange ?? (() => { });
 
   if (!bar) {
     console.warn("[layout-v2] activity bar state is missing");
@@ -213,9 +210,81 @@ export function ActivityBar(props: {
   }
 
   const activityBar = bar;
-  const draggingIconId = dragSession?.currentBarId === activityBar.id
+  const draggingIconId = dragSession?.phase === "dragging" && dragSession.currentBarId === activityBar.id
     ? dragSession.iconId
     : null;
+  const draggingPanelId = panelDragSession?.phase === "dragging" && panelDragSession.activityTarget?.barId === activityBar.id
+    ? panelDragSession.panelId
+    : null;
+
+  useEffect(() => {
+    const isDragging = dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging";
+    document.body.classList.toggle("layout-v2--dragging", isDragging);
+
+    return () => {
+      if (isDragging) {
+        document.body.classList.remove("layout-v2--dragging");
+      }
+    };
+  }, [dragSession?.phase, panelDragSession?.phase]);
+
+  useEffect(() => {
+    if (!dragSession || dragSession.sourceBarId !== activityBar.id) {
+      return;
+    }
+    const currentDragSession: ActivityBarDragSession = dragSession;
+
+    function handlePointerMove(event: PointerEvent): void {
+      if (event.pointerId !== currentDragSession.pointerId) {
+        return;
+      }
+
+      const distance = Math.hypot(
+        event.clientX - currentDragSession.originX,
+        event.clientY - currentDragSession.originY,
+      );
+      const nextPhase = currentDragSession.phase === "pending" && distance >= DRAG_START_DISTANCE_PX
+        ? "dragging"
+        : currentDragSession.phase;
+
+      if (
+        nextPhase === currentDragSession.phase &&
+        currentDragSession.pointerX === event.clientX &&
+        currentDragSession.pointerY === event.clientY
+      ) {
+        return;
+      }
+
+      updateDragSession({
+        ...currentDragSession,
+        phase: nextPhase,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+      });
+    }
+
+    function handlePointerEnd(event: PointerEvent): void {
+      if (event.pointerId !== currentDragSession.pointerId) {
+        return;
+      }
+
+      if (currentDragSession.phase === "dragging") {
+        onDragSessionEnd?.(currentDragSession);
+      }
+
+      updateDragSession(null);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, [activityBar.id, dragSession, onDragSessionEnd, updateDragSession]);
 
   useLayoutEffect(() => {
     const nextSlotTops: Record<string, number> = {};
@@ -303,16 +372,74 @@ export function ActivityBar(props: {
       iconId: dragSession.iconId,
       targetIndex,
     });
-    onDragSessionChange({
+    updateDragSession({
       ...dragSession,
       currentBarId: activityBar.id,
+      panelTarget: null,
       targetIndex,
     });
-  }, [activityBar.icons, activityBar.id, dragSession, onDragSessionChange, onMoveIcon]);
+  }, [activityBar.icons, activityBar.id, dragSession, onMoveIcon, updateDragSession]);
+
+  useEffect(() => {
+    if (!panelDragSession || panelDragSession.phase !== "dragging") {
+      return;
+    }
+
+    const rootElement = rootRef.current;
+    if (!rootElement) {
+      return;
+    }
+
+    const barRect = rootElement.getBoundingClientRect();
+    const isInside = (
+      panelDragSession.pointerX >= barRect.left &&
+      panelDragSession.pointerX <= barRect.right &&
+      panelDragSession.pointerY >= barRect.top &&
+      panelDragSession.pointerY <= barRect.bottom
+    );
+
+    if (!isInside) {
+      if (panelDragSession.activityTarget?.barId === activityBar.id) {
+        updatePanelDragSession({
+          ...panelDragSession,
+          activityTarget: null,
+        });
+      }
+      return;
+    }
+
+    const targetIndex = getTargetIndexFromPointer(
+      panelDragSession.pointerY,
+      slotRefs.current,
+      activityBar.icons.map((icon) => icon.id),
+      panelDragSession.activityTarget?.barId === activityBar.id
+        ? panelDragSession.activityTarget.targetIndex
+        : undefined,
+    );
+
+    if (
+      panelDragSession.activityTarget?.barId === activityBar.id &&
+      panelDragSession.activityTarget.targetIndex === targetIndex
+    ) {
+      return;
+    }
+
+    updatePanelDragSession({
+      ...panelDragSession,
+      activityTarget: {
+        barId: activityBar.id,
+        targetIndex,
+      },
+    });
+  }, [activityBar.icons, activityBar.id, panelDragSession, updatePanelDragSession]);
 
   const isPointerInside = Boolean(
     dragSession?.phase === "dragging" &&
     dragSession.currentBarId === activityBar.id,
+  );
+  const isPanelPointerInside = Boolean(
+    panelDragSession?.phase === "dragging" &&
+    panelDragSession.activityTarget?.barId === activityBar.id,
   );
 
   /**
@@ -321,7 +448,7 @@ export function ActivityBar(props: {
    * @param payload pointer 按下载荷。
    */
   function handlePointerPress(payload: ActivityBarPointerPressPayload): void {
-    onDragSessionChange(buildDragSessionFromPress(payload));
+    updateDragSession(buildDragSessionFromPress(payload));
   }
 
   return (
@@ -329,8 +456,10 @@ export function ActivityBar(props: {
       ref={rootRef}
       className={[
         "layout-v2-activity-bar",
-        dragSession?.phase === "dragging" ? "layout-v2-activity-bar--dragging" : "",
-        isPointerInside ? "layout-v2-activity-bar--drag-over" : "",
+        dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging"
+          ? "layout-v2-activity-bar--dragging"
+          : "",
+        isPointerInside || isPanelPointerInside ? "layout-v2-activity-bar--drag-over" : "",
       ].filter(Boolean).join(" ")}
     >
       {/* icon 列表：默认从上至下排列，并通过拖拽在同栏或跨栏移动。 */}
@@ -343,7 +472,10 @@ export function ActivityBar(props: {
               slotRefs.current[icon.id] = element;
             }}
           >
-            {draggingIconId === icon.id ? (
+            {isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === index ? (
+              <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
+            ) : null}
+            {draggingIconId === icon.id || draggingPanelId === icon.id ? (
               <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
             ) : (
               <ActivityBarIcon
@@ -352,7 +484,12 @@ export function ActivityBar(props: {
                 icon={icon}
                 selected={activityBar.selectedIconId === icon.id}
                 dragging={dragSession?.phase === "dragging" && dragSession.iconId === icon.id}
-                onSelect={() => onSelectIcon(icon.id)}
+                onSelect={() => {
+                  onActivateIcon?.(icon.id);
+                  if (icon.activationMode !== "action") {
+                    onSelectIcon(icon.id);
+                  }
+                }}
                 onPointerPress={handlePointerPress}
               />
             )}
@@ -361,7 +498,8 @@ export function ActivityBar(props: {
         <div
           className={[
             "layout-v2-activity-bar__tail-drop-target",
-            isPointerInside && dragSession?.phase === "dragging" && dragSession.targetIndex === activityBar.icons.length
+            (isPointerInside && dragSession?.phase === "dragging" && dragSession.targetIndex === activityBar.icons.length) ||
+              (isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === activityBar.icons.length)
               ? "layout-v2-activity-bar__tail-drop-target--drag-over"
               : "",
           ]

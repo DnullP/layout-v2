@@ -14,6 +14,7 @@ import {
   resetSectionSequenceForTest,
   splitSectionTree,
 } from "../src";
+import { createSectionTreeExample } from "../example/usage/sectionTreeExample";
 
 afterEach(() => {
   resetSectionSequenceForTest();
@@ -144,6 +145,15 @@ describe("layout-v2 layout model", () => {
       },
     );
 
+    expect(canResizeSectionSplit(root)).toBe(false);
+    expect(isSectionEdgeDraggable(root.split!.children[0], "right")).toBe(false);
+  });
+
+  test("示例布局中的 activity bar 分隔条默认应锁定", () => {
+    const root = createSectionTreeExample();
+
+    expect(root.split).not.toBeNull();
+    expect(root.split?.children[0].id).toBe("activity-bar");
     expect(canResizeSectionSplit(root)).toBe(false);
     expect(isSectionEdgeDraggable(root.split!.children[0], "right")).toBe(false);
   });

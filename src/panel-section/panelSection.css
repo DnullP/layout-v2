@@ -1,0 +1,206 @@
+.layout-v2-panel-section {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 94%, black 6%), color-mix(in srgb, var(--bg-primary) 92%, black 8%));
+}
+
+.layout-v2-panel-section__bar {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--chrome-border-soft);
+    background: color-mix(in srgb, var(--bg-secondary) 94%, black 6%);
+    user-select: none;
+}
+
+.layout-v2-panel-section__bar--drag-over {
+    background: color-mix(in srgb, var(--bg-secondary) 84%, var(--accent-primary-soft) 16%);
+}
+
+.layout-v2-panel-section__bar-list {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.layout-v2-panel-section__panel-slot {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    will-change: transform;
+}
+
+.layout-v2-panel-section__panel-placeholder {
+    width: 30px;
+    height: 30px;
+    border: 1px dashed color-mix(in srgb, var(--text-secondary) 36%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-hover) 34%, transparent);
+}
+
+.layout-v2-panel-section__panel-tab {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--chrome-border-soft) 86%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-primary) 84%, white 4%);
+    color: var(--text-secondary);
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+}
+
+.layout-v2-panel-section__panel-tab--focused {
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--accent-primary) 32%, var(--chrome-border-strong));
+    background: color-mix(in srgb, var(--accent-primary-soft) 40%, var(--bg-primary));
+}
+
+.layout-v2-panel-section__panel-symbol {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.layout-v2-panel-section__panel-label {
+    display: none;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.layout-v2-panel-section__toggle {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--chrome-border-soft) 86%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-primary) 84%, white 4%);
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.layout-v2-panel-section__content {
+    min-height: 0;
+    flex: 1;
+    padding: 10px;
+    overflow: hidden;
+    transition:
+        flex-basis 180ms ease,
+        opacity 180ms ease,
+        padding 180ms ease;
+}
+
+.layout-v2-panel-section__content--collapsed {
+    flex: 0 0 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+}
+
+.layout-v2-panel-section__content--drag-over {
+    background: color-mix(in srgb, var(--accent-primary-soft-weak) 22%, transparent);
+}
+
+.layout-v2-panel-section__content-inner {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+
+.layout-v2-panel-section__pane {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--chrome-border-soft);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--bg-secondary) 92%, white 8%);
+}
+
+.layout-v2-panel-section__pane--neutral {
+    background: color-mix(in srgb, var(--bg-secondary) 92%, white 8%);
+}
+
+.layout-v2-panel-section__pane--blue {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-primary) 12%, white), color-mix(in srgb, var(--bg-secondary) 92%, white));
+}
+
+.layout-v2-panel-section__pane--green {
+    background: linear-gradient(180deg, rgba(47, 161, 84, 0.12), color-mix(in srgb, var(--bg-secondary) 92%, white));
+}
+
+.layout-v2-panel-section__pane--amber {
+    background: linear-gradient(180deg, rgba(209, 147, 35, 0.14), color-mix(in srgb, var(--bg-secondary) 92%, white));
+}
+
+.layout-v2-panel-section__pane--red {
+    background: linear-gradient(180deg, rgba(201, 79, 79, 0.12), color-mix(in srgb, var(--bg-secondary) 92%, white));
+}
+
+.layout-v2-panel-section__pane-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.layout-v2-panel-section__pane-symbol {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-primary) 82%, white 6%);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.layout-v2-panel-section__pane-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.layout-v2-panel-section__pane-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.layout-v2-panel-section__empty-pane {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed color-mix(in srgb, var(--chrome-border-soft) 86%, transparent);
+    border-radius: 14px;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+}

@@ -76,6 +76,18 @@ export interface SectionResizableEdges {
 export type SectionSplitDirection = "horizontal" | "vertical";
 
 /**
+ * @constant SECTION_SPLIT_HORIZONTAL
+ * @description 左右分割方向常量。
+ */
+export const SECTION_SPLIT_HORIZONTAL: SectionSplitDirection = "horizontal";
+
+/**
+ * @constant SECTION_SPLIT_VERTICAL
+ * @description 上下分割方向常量。
+ */
+export const SECTION_SPLIT_VERTICAL: SectionSplitDirection = "vertical";
+
+/**
  * @interface SectionDraft
  * @description 新建 section 时使用的草稿信息。
  * @template T section 承载的数据类型。
@@ -507,9 +519,9 @@ export function resizeSectionSplit<T>(
     ...node,
     split: node.split
       ? {
-          ...node.split,
-          ratio: nextRatio,
-        }
+        ...node.split,
+        ratio: nextRatio,
+      }
       : null,
   }));
 

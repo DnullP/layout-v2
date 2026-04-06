@@ -12,16 +12,40 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./section": {
+      "types": "./dist/section/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./activity": {
+      "types": "./dist/activity/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./panel": {
+      "types": "./dist/panel/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./tab": {
+      "types": "./dist/tab/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./vscode-layout": {
+      "types": "./dist/vscode-layout/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
     "dist",
-    "src",
     "README.md"
   ],
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4175 --strictPort",
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && vite build",
     "prepare": "npm run build",
     "test": "bun test",
     "test:e2e": "bunx playwright test --config playwright.config.ts --reporter=line"

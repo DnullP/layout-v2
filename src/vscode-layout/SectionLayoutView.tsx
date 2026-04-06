@@ -6,7 +6,7 @@
  * @dependencies
  *   - react
  *   - ./layoutModel
- *   - ./layoutV2.css
+ *   - ./layout.css
  *
  * @example
  *   <SectionLayoutView
@@ -35,7 +35,8 @@ import {
   type SectionNode,
   type SectionSplitDirection,
 } from "./layoutModel";
-import "./layoutV2.css";
+import { Section } from "./Section";
+import "./layout.css";
 
 /**
  * @interface SectionLayoutViewProps
@@ -454,10 +455,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
 
   if (!node.split) {
     return (
-      <div className="layout-v2__leaf-shell" data-section-id={node.id}>
-        {/* 叶子 section 内容承载层：引擎本身不施加装饰，只负责承载业务内容。 */}
-        <div className="layout-v2__leaf-content">{renderSection(node)}</div>
-      </div>
+      <Section sectionId={node.id}>{renderSection(node)}</Section>
     );
   }
 
@@ -472,19 +470,19 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
   const secondTargetRatio = 1 - node.split.ratio;
   const firstChildStyle = splitAnimation
     ? {
-        flex: "0 0 auto",
-        flexBasis: splitAnimation.newChildIndex === 0
-          ? (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "0%")
-          : (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "100%"),
-      }
+      flex: "0 0 auto",
+      flexBasis: splitAnimation.newChildIndex === 0
+        ? (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "0%")
+        : (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "100%"),
+    }
     : buildChildStyle(node.split.ratio, true);
   const secondChildStyle = splitAnimation
     ? {
-        flex: "0 0 auto",
-        flexBasis: splitAnimation.newChildIndex === 1
-          ? (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "0%")
-          : (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "100%"),
-      }
+      flex: "0 0 auto",
+      flexBasis: splitAnimation.newChildIndex === 1
+        ? (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "0%")
+        : (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "100%"),
+    }
     : buildChildStyle(node.split.ratio, false);
 
   return (

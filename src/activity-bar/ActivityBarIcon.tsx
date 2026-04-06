@@ -90,7 +90,6 @@ export function ActivityBarIcon(props: {
       return;
     }
 
-    event.preventDefault();
     onPointerPress({
       sourceBarId: barId,
       iconId: icon.id,

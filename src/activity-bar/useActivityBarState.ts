@@ -22,6 +22,7 @@ import {
   createActivityBarState,
   getActivityBarById,
   moveActivityBarIcon,
+  removeActivityBarIcon,
   selectActivityBarIcon,
   type ActivityBarIconMove,
   type ActivityBarsState,
@@ -44,6 +45,7 @@ export interface UseActivityBarStateOptions {
  * @field state      - 当前状态。
  * @field getBar     - 获取指定 bar。
  * @field selectIcon - 选中 icon。
+ * @field removeIcon - 移除 icon。
  * @field moveIcon   - 移动 icon。
  * @field resetState - 重置状态。
  */
@@ -54,6 +56,8 @@ export interface ActivityBarStateController {
   getBar: (barId: string) => ActivityBarStateItem | null;
   /** 选中 icon。 */
   selectIcon: (barId: string, iconId: string) => void;
+  /** 移除 icon。 */
+  removeIcon: (barId: string, iconId: string) => void;
   /** 移动 icon。 */
   moveIcon: (move: ActivityBarIconMove) => void;
   /** 重置状态。 */
@@ -66,18 +70,23 @@ export interface ActivityBarStateController {
  */
 type ActivityBarAction =
   | {
-      type: "select";
-      barId: string;
-      iconId: string;
-    }
+    type: "select";
+    barId: string;
+    iconId: string;
+  }
   | {
-      type: "move";
-      move: ActivityBarIconMove;
-    }
+    type: "move";
+    move: ActivityBarIconMove;
+  }
   | {
-      type: "reset";
-      nextState: ActivityBarsState;
-    };
+    type: "remove";
+    barId: string;
+    iconId: string;
+  }
+  | {
+    type: "reset";
+    nextState: ActivityBarsState;
+  };
 
 /**
  * @function activityBarReducer
@@ -96,6 +105,10 @@ function activityBarReducer(
 
   if (action.type === "move") {
     return moveActivityBarIcon(state, action.move);
+  }
+
+  if (action.type === "remove") {
+    return removeActivityBarIcon(state, action.barId, action.iconId);
   }
 
   return action.nextState;
@@ -118,6 +131,13 @@ export function useActivityBarState(
     selectIcon: (barId, iconId) => {
       dispatch({
         type: "select",
+        barId,
+        iconId,
+      });
+    },
+    removeIcon: (barId, iconId) => {
+      dispatch({
+        type: "remove",
         barId,
         iconId,
       });

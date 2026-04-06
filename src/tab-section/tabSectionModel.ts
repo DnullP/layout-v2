@@ -24,6 +24,7 @@
  *   });
  *
  * @exports
+ *   - TabSectionTabType        tab 内容类型标识
  *   - TabSectionTabDefinition  tab/card 定义
  *   - TabSectionStateItem      单个 tab section 状态
  *   - TabSectionsState         所有 tab section 状态
@@ -39,10 +40,19 @@
  */
 
 /**
+ * @type TabSectionTabType
+ * @description tab 内容类型标识。
+ *   外部应用可用它把不同 tab 映射到不同渲染器。
+ */
+export type TabSectionTabType = string;
+
+/**
  * @interface TabSectionTabDefinition
  * @description tab 及其对应 card 的定义。
  * @field id       - tab/card 唯一标识。
  * @field title    - tab 文本。
+ * @field type     - tab 内容类型标识。
+ * @field payload  - tab 内容渲染所需的纯数据载荷。
  * @field content  - card 主体内容。
  * @field tone     - card 的视觉语义色。
  */
@@ -51,6 +61,10 @@ export interface TabSectionTabDefinition {
   id: string;
   /** tab 文本。 */
   title: string;
+  /** tab 内容类型标识。 */
+  type?: TabSectionTabType;
+  /** tab 内容渲染所需的纯数据载荷。 */
+  payload?: unknown;
   /** card 主体内容。 */
   content: string;
   /** card 的视觉语义色。 */

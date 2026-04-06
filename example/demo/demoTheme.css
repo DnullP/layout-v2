@@ -1,0 +1,48 @@
+/* 全局主题变量：为仓库内 demo 提供 layout-v2 所需的最小视觉 token。 */
+:root {
+    --bg-primary: #181c22;
+    --bg-secondary: #21262e;
+    --bg-hover: #2a3039;
+    --text-primary: #edf2f7;
+    --text-secondary: #98a2b3;
+    --accent-primary: #3b82f6;
+    --accent-primary-foreground: #ffffff;
+    --accent-primary-soft: rgba(59, 130, 246, 0.24);
+    --accent-primary-soft-weak: rgba(59, 130, 246, 0.16);
+    --shell-content-background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 32%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%),
+        #181c22;
+    --chrome-tabstrip-bg: #1c2128;
+    --chrome-tab-active-bg: #262c35;
+    --chrome-tab-inactive-bg: #1f252d;
+    --chrome-border-soft: rgba(255, 255, 255, 0.1);
+    --chrome-border-strong: rgba(255, 255, 255, 0.16);
+    --chrome-shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.22);
+    --chrome-shadow-strong: 0 18px 40px rgba(0, 0, 0, 0.32);
+}
+
+html,
+body,
+#root {
+    margin: 0;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+body {
+    overflow: hidden;
+    font-family: "SF Pro Display", "Segoe UI", sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+button {
+    font: inherit;
+}

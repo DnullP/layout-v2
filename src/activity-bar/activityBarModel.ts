@@ -48,6 +48,8 @@ export interface ActivityBarIconDefinition {
   label: string;
   /** icon 的简化符号内容。 */
   symbol: string;
+  /** 点击后是切换选中态还是仅触发外部动作。 */
+  activationMode?: "focus" | "action";
 }
 
 /**
@@ -145,6 +147,82 @@ export function selectActivityBarIcon(
       [barId]: {
         ...bar,
         selectedIconId: iconId,
+      },
+    },
+  };
+}
+
+/**
+ * @function removeActivityBarIcon
+ * @description 从指定 activity bar 中移除一个 icon。
+ * @param state activity bar 状态。
+ * @param barId activity bar 标识。
+ * @param iconId 目标 icon 标识。
+ * @returns 更新后的状态。
+ */
+export function removeActivityBarIcon(
+  state: ActivityBarsState,
+  barId: string,
+  iconId: string,
+): ActivityBarsState {
+  const bar = getActivityBarById(state, barId);
+  if (!bar) {
+    return state;
+  }
+
+  const removedIndex = bar.icons.findIndex((icon) => icon.id === iconId);
+  if (removedIndex < 0) {
+    return state;
+  }
+
+  const nextIcons = bar.icons.filter((icon) => icon.id !== iconId);
+  const nextSelectedIconId = bar.selectedIconId === iconId
+    ? nextIcons[Math.max(0, removedIndex - 1)]?.id ?? nextIcons[0]?.id ?? null
+    : bar.selectedIconId;
+
+  return {
+    bars: {
+      ...state.bars,
+      [barId]: {
+        ...bar,
+        icons: nextIcons,
+        selectedIconId: nextSelectedIconId,
+      },
+    },
+  };
+}
+
+/**
+ * @function insertActivityBarIcon
+ * @description 向指定 activity bar 插入一个 icon。
+ * @param state activity bar 状态。
+ * @param barId activity bar 标识。
+ * @param icon 待插入 icon。
+ * @param targetIndex 目标插入位置。
+ * @returns 更新后的状态。
+ */
+export function insertActivityBarIcon(
+  state: ActivityBarsState,
+  barId: string,
+  icon: ActivityBarIconDefinition,
+  targetIndex: number,
+): ActivityBarsState {
+  const bar = getActivityBarById(state, barId);
+  if (!bar) {
+    return state;
+  }
+
+  const nextIcons = [...bar.icons.filter((item) => item.id !== icon.id)];
+  const nextTargetIndex = clampTargetIndex(targetIndex, nextIcons.length);
+  nextIcons.splice(nextTargetIndex, 0, icon);
+
+  return {
+    bars: {
+      ...state.bars,
+      [barId]: {
+        ...bar,
+        icons: nextIcons,
+        selectedIconId: icon.id,
       },
     },
   };

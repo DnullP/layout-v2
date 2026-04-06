@@ -5,19 +5,74 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  buildPreviewLayoutState,
-  cleanupEmptyTabSections,
-  createExampleSectionDraft,
   createTabSectionsState,
   createRootSection,
   createSectionComponentBinding,
-  findTabSectionLeaf,
   splitSectionTree,
   type TabSectionDragSession,
-  type ExampleSectionLayoutData,
 } from "../src";
+import {
+  buildPreviewLayoutState,
+  closeTabInLayoutState,
+  cleanupEmptyTabSections,
+  createExampleSectionDraft,
+  findTabSectionLeaf,
+  type ExampleSectionLayoutData,
+} from "../example/exampleLayoutState";
 
 describe("layoutV2 example state", () => {
+  test("关闭最后一个 tab 时应销毁空 tab section 并提升 sibling", () => {
+    let root = createRootSection<ExampleSectionLayoutData>(
+      createExampleSectionDraft(
+        "root",
+        "Root",
+        "root",
+        createSectionComponentBinding("empty", {}),
+      ),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createExampleSectionDraft(
+        "main-leaf",
+        "Main",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "main-tabs",
+        }),
+      ),
+      second: createExampleSectionDraft(
+        "review-leaf",
+        "Review",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "review-tabs",
+        }),
+      ),
+    });
+
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [{ id: "welcome", title: "Welcome", content: "Welcome card" }],
+        focusedTabId: "welcome",
+        isRoot: true,
+      },
+      {
+        id: "review-tabs",
+        tabs: [{ id: "review", title: "Review", content: "Review card" }],
+        focusedTabId: "review",
+        isRoot: false,
+      },
+    ]);
+
+    const closed = closeTabInLayoutState(root, state, "main-tabs", "welcome");
+
+    expect(findTabSectionLeaf(closed.root, "main-tabs")).toBeNull();
+    expect(findTabSectionLeaf(closed.root, "review-tabs")?.id).toBe("root");
+    expect(closed.state.sections["main-tabs"]).toBeUndefined();
+    expect(closed.state.sections["review-tabs"]?.isRoot).toBe(true);
+  });
+
   test("空 root tab section 在 sibling 带子结构时应被折叠并转移 root 标记", () => {
     let root = createRootSection<ExampleSectionLayoutData>(
       createExampleSectionDraft(

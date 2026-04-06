@@ -8,5 +8,20 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"]
+  "include": [
+    "src/index.ts",
+    "src/section/**/*.ts",
+    "src/section/**/*.tsx",
+    "src/activity/**/*.ts",
+    "src/panel/**/*.ts",
+    "src/tab/**/*.ts",
+    "src/vscode-layout/**/*.ts",
+    "src/vscode-layout/**/*.tsx",
+    "src/activity-bar/**/*.ts",
+    "src/activity-bar/**/*.tsx",
+    "src/panel-section/**/*.ts",
+    "src/panel-section/**/*.tsx",
+    "src/tab-section/**/*.ts",
+    "src/tab-section/**/*.tsx"
+  ]
 }
