@@ -1,0 +1,273 @@
+/* tab section 根容器：分为 tab strip 与 content 两段。 */
+.layout-v2-tab-section {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--shell-content-background);
+}
+
+/* tab strip：承载 tab 列表并提供轻度结构边界。 */
+.layout-v2-tab-section__strip {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--chrome-border-soft);
+  background: var(--chrome-tabstrip-bg);
+  overflow: hidden;
+}
+
+/* strip 拖拽悬停态：轻微提亮，提示可以在此重排或插入。 */
+.layout-v2-tab-section__strip--drag-over {
+  background: color-mix(in srgb, var(--chrome-tabstrip-bg) 86%, var(--accent-primary-soft) 14%);
+}
+
+/* tab slot：为 tab 本体或 placeholder 提供定位与动画容器。 */
+.layout-v2-tab-section__tab-slot {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 220px;
+  will-change: transform;
+}
+
+/* tab placeholder：拖拽中的 tab 在 strip 内以虚线占位。 */
+.layout-v2-tab-section__tab-placeholder {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px dashed color-mix(in srgb, var(--text-secondary) 36%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg-hover) 34%, transparent);
+}
+
+/* tab 本体：方形标签，左文右关，并与相邻 tab 紧贴排列。 */
+.layout-v2-tab-section__tab {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 12px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--chrome-border-soft) 86%, transparent);
+  border-radius: 0;
+  border-left-width: 0;
+  background: var(--chrome-tab-inactive-bg);
+  color: var(--text-secondary);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.24) inset;
+}
+
+/* strip 首个 tab：保留最左侧边界，避免与 strip 背景直接连成一片。 */
+.layout-v2-tab-section__tab-slot:first-child .layout-v2-tab-section__tab {
+  border-left-width: 1px;
+}
+
+/* focused tab：提亮为当前 section 的 focus。 */
+.layout-v2-tab-section__tab--focused {
+  background: var(--chrome-tab-active-bg);
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--chrome-border-strong) 80%, transparent);
+}
+
+/* tab 主点击区：承载标题并响应 focus/drag。 */
+.layout-v2-tab-section__tab-main {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* tab 标题：超长时省略。 */
+.layout-v2-tab-section__tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 关闭按钮：位于 tab 右侧的小型交互区。 */
+.layout-v2-tab-section__tab-close {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 关闭按钮 hover 态：提供轻度底色反馈。 */
+.layout-v2-tab-section__tab-close:hover {
+  background: color-mix(in srgb, var(--bg-hover) 72%, transparent);
+}
+
+/* content 区域：承载当前 focused card。 */
+.layout-v2-tab-section__content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* content 拖拽悬停态：整体稍微提亮，提示允许分区。 */
+.layout-v2-tab-section__content--drag-over {
+  background: color-mix(in srgb, var(--accent-primary-soft-weak) 20%, transparent);
+}
+
+/* card 本体：完整填充 content。 */
+.layout-v2-tab-section__card {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--chrome-border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 90%, white 10%);
+}
+
+/* neutral card：默认语义色。 */
+.layout-v2-tab-section__card--neutral {
+  background: color-mix(in srgb, var(--bg-secondary) 90%, white 10%);
+}
+
+/* blue card：蓝色语义卡片。 */
+.layout-v2-tab-section__card--blue {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-primary) 12%, white), color-mix(in srgb, var(--bg-secondary) 94%, white));
+}
+
+/* green card：绿色语义卡片。 */
+.layout-v2-tab-section__card--green {
+  background: linear-gradient(180deg, rgba(47, 161, 84, 0.12), color-mix(in srgb, var(--bg-secondary) 94%, white));
+}
+
+/* amber card：琥珀语义卡片。 */
+.layout-v2-tab-section__card--amber {
+  background: linear-gradient(180deg, rgba(209, 147, 35, 0.14), color-mix(in srgb, var(--bg-secondary) 94%, white));
+}
+
+/* red card：红色语义卡片。 */
+.layout-v2-tab-section__card--red {
+  background: linear-gradient(180deg, rgba(201, 79, 79, 0.12), color-mix(in srgb, var(--bg-secondary) 94%, white));
+}
+
+/* card 标题：强调当前 focused 内容。 */
+.layout-v2-tab-section__card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* card 正文：作为内容区域的占位文本。 */
+.layout-v2-tab-section__card-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* 空状态：当当前 section 暂无可展示 card 时的占位。 */
+.layout-v2-tab-section__empty-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed color-mix(in srgb, var(--chrome-border-soft) 86%, transparent);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+}
+
+/* tab 预览浮层：鼠标位于 strip 时显示。 */
+.layout-v2-tab-section-drag-preview--tab {
+  width: 180px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 12px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--chrome-border-strong) 82%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--chrome-tab-active-bg) 94%, white 6%);
+  color: var(--text-primary);
+  box-shadow: var(--chrome-shadow-soft);
+}
+
+/* tab 预览标题：与真实 tab 保持一致的截断行为。 */
+.layout-v2-tab-section-drag-preview__tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* tab 预览关闭占位：仅用于保持结构一致，不具备交互。 */
+.layout-v2-tab-section-drag-preview__tab-close {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  color: var(--text-secondary);
+}
+
+/* card 预览浮层：鼠标位于 content 时显示为缩小卡片。 */
+.layout-v2-tab-section-drag-preview--card {
+  width: 220px;
+  height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--chrome-border-strong) 82%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 94%, white 6%);
+  color: var(--text-primary);
+  box-shadow: var(--chrome-shadow-strong);
+  transform: scale(0.5);
+  transform-origin: top left;
+}
+
+/* card 预览标题：强调拖起的 card。 */
+.layout-v2-tab-section-drag-preview__card-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* card 预览正文：只展示一小段摘要。 */
+.layout-v2-tab-section-drag-preview__card-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}

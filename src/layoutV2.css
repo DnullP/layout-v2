@@ -1,0 +1,182 @@
+/* layout-v2 根容器：占满父容器，不附带边框、圆角或背景装饰。 */
+.layout-v2__root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 分支节点：每个已切割 section 的递归容器。 */
+.layout-v2__branch {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+}
+
+/* 左右切割分支：子区域沿水平方向排列。 */
+.layout-v2__branch--horizontal {
+  flex-direction: row;
+}
+
+/* 上下切割分支：子区域沿垂直方向排列。 */
+.layout-v2__branch--vertical {
+  flex-direction: column;
+}
+
+/* 子区域槽位：承接每个 section 的 flex 比例与最小尺寸约束。 */
+.layout-v2__child-slot {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* split 入场中的子区域槽位：通过尺寸过渡让分区线真实移动到目标位置。 */
+.layout-v2__child-slot--split-entering {
+  overflow: hidden;
+  contain: layout paint;
+  transition: flex-basis 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* 子区域内部包装层：为新 section 内容滑入提供独立动画层。 */
+.layout-v2__child-slot-inner {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* 新 section 的内容层：从对应边缘外侧滑入目标半区。 */
+.layout-v2__child-slot-inner--new {
+  will-change: transform;
+  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* 左右切分且新区在右侧时：新右区从右侧外部滑入。 */
+.layout-v2__child-slot-inner--new[data-split-direction="horizontal"][data-new-child-index="1"] {
+  transform: translateX(100%);
+}
+
+/* 左右切分且新区在左侧时：新左区从左侧外部滑入。 */
+.layout-v2__child-slot-inner--new[data-split-direction="horizontal"][data-new-child-index="0"] {
+  transform: translateX(-100%);
+}
+
+/* 上下切分且新区在下侧时：新下区从下方外部滑入。 */
+.layout-v2__child-slot-inner--new[data-split-direction="vertical"][data-new-child-index="1"] {
+  transform: translateY(100%);
+}
+
+/* 上下切分且新区在上侧时：新上区从上方外部滑入。 */
+.layout-v2__child-slot-inner--new[data-split-direction="vertical"][data-new-child-index="0"] {
+  transform: translateY(-100%);
+}
+
+/* split 动画进入完成后：新旧内容都回到稳定位置。 */
+.layout-v2__child-slot-inner--entered {
+  transform: translate(0, 0);
+}
+
+/* 叶子 section 外壳：完全空白，只负责占满区域。 */
+.layout-v2__leaf-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* 叶子 section 内容层：允许未来接入 React 内容；当前保持空白。 */
+.layout-v2__leaf-content {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* 分隔条交互层：扩大可命中的拖拽区域。 */
+.layout-v2__divider {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+}
+
+/* 左右布局中的垂直分隔条：使用 col-resize 鼠标样式。 */
+.layout-v2__divider--horizontal {
+  width: 10px;
+  cursor: col-resize;
+}
+
+/* 上下布局中的水平分隔条：使用 row-resize 鼠标样式。 */
+.layout-v2__divider--vertical {
+  height: 10px;
+  cursor: row-resize;
+}
+
+/* 锁定分隔条：表示该边界不允许拖拽。 */
+.layout-v2__divider--disabled {
+  cursor: default;
+}
+
+/* 分隔线默认态：灰色细线。 */
+.layout-v2__divider-line {
+  background: rgba(148, 148, 148, 0.72);
+  transition:
+    background 140ms ease,
+    width 140ms ease,
+    height 140ms ease;
+}
+
+/* 左右布局下的可视分隔线：默认是一条细竖线。 */
+.layout-v2__divider--horizontal .layout-v2__divider-line {
+  width: 1px;
+  height: 100%;
+}
+
+/* 上下布局下的可视分隔线：默认是一条细横线。 */
+.layout-v2__divider--vertical .layout-v2__divider-line {
+  width: 100%;
+  height: 1px;
+}
+
+/* 可拖拽分隔线 hover/drag 时：变蓝并加粗。 */
+.layout-v2__divider:not(.layout-v2__divider--disabled):hover .layout-v2__divider-line,
+.layout-v2__divider:not(.layout-v2__divider--disabled).layout-v2__divider--dragging .layout-v2__divider-line {
+  background: var(--accent-primary);
+}
+
+/* 左右布局 hover/drag 时的高亮竖线：由 1px 变为 3px。 */
+.layout-v2__divider--horizontal:not(.layout-v2__divider--disabled):hover .layout-v2__divider-line,
+.layout-v2__divider--horizontal:not(.layout-v2__divider--disabled).layout-v2__divider--dragging .layout-v2__divider-line {
+  width: 3px;
+}
+
+/* 上下布局 hover/drag 时的高亮横线：由 1px 变为 3px。 */
+.layout-v2__divider--vertical:not(.layout-v2__divider--disabled):hover .layout-v2__divider-line,
+.layout-v2__divider--vertical:not(.layout-v2__divider--disabled).layout-v2__divider--dragging .layout-v2__divider-line {
+  height: 3px;
+}
+
+/* 示例应用根容器：铺满窗口并让布局直接占满舞台。 */
+.layout-v2-example__app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+/* 全屏布局：直接占满整个示例页面。 */
+.layout-v2-example__fullscreen-layout {
+  width: 100%;
+  height: 100%;
+}

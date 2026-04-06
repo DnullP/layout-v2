@@ -1,0 +1,142 @@
+/* activity bar 根容器：完整贴合 section 并提供独立的垂直导航底色。 */
+.layout-v2-activity-bar {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, black 8%);
+  user-select: none;
+}
+
+/* activity bar 拖拽中态：禁止文本选择，避免 pointer 拖动时出现选区。 */
+.layout-v2-activity-bar--dragging {
+  cursor: grabbing;
+}
+
+/* 当前 pointer 悬停到的 activity bar：作为跨 bar 落位反馈。 */
+.layout-v2-activity-bar--drag-over {
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--accent-primary-soft) 12%);
+}
+
+/* icon 列表：从上至下排列 icon。 */
+.layout-v2-activity-bar__icon-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* icon 槽位：承载 icon 或拖拽占位。 */
+.layout-v2-activity-bar__icon-slot {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  will-change: transform;
+}
+
+/* icon 拖拽占位：当 icon 被拖起后，在实时落点留出空位。 */
+.layout-v2-activity-bar__icon-placeholder {
+  width: 36px;
+  height: 36px;
+  border: 1px dashed color-mix(in srgb, var(--text-secondary) 36%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-hover) 36%, transparent);
+}
+
+/* icon 组件：支持点击选中与拖拽。 */
+.layout-v2-activity-bar__icon {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: none;
+  transition:
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+/* icon hover 态：轻微提亮以表达可交互性。 */
+.layout-v2-activity-bar__icon:hover {
+  color: var(--text-primary);
+}
+
+/* 选中 icon：显示更强前景色和左侧选中条。 */
+.layout-v2-activity-bar__icon--selected {
+  position: relative;
+  color: var(--text-primary);
+}
+
+/* 选中指示条：模拟 activity bar 的选中条。 */
+.layout-v2-activity-bar__icon--selected::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--text-primary);
+}
+
+/* 正在被拖动的 icon 本体：交由浮层展示，原按钮不再显示。 */
+.layout-v2-activity-bar__icon--dragging {
+  opacity: 0;
+}
+
+/* icon 符号：使用简化字母表现测试 icon。 */
+.layout-v2-activity-bar__icon-symbol {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* 尾部 drop target：支持将 icon 拖到列表末尾。 */
+.layout-v2-activity-bar__tail-drop-target {
+  width: 22px;
+  height: 6px;
+  margin-top: 4px;
+  background: transparent;
+  border-radius: 999px;
+}
+
+/* 尾部 drop target 高亮：表示 icon 将插入列表末尾。 */
+.layout-v2-activity-bar__tail-drop-target--drag-over {
+  background: var(--accent-primary);
+}
+
+/* 拖拽预览：跟随指针显示当前被拖动的 icon。 */
+.layout-v2-activity-bar-drag-preview {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--text-secondary));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 90%, white 10%);
+  color: var(--text-primary);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.24),
+    0 0 0 1px rgba(255, 255, 255, 0.24) inset;
+  pointer-events: none;
+  z-index: 9999;
+  transform-origin: center;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  opacity: 0.96;
+}
