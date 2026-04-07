@@ -28,6 +28,7 @@ import {
 } from "react";
 import {
   ActivityBarIcon,
+  type ActivityBarIconRenderer,
   type ActivityBarPointerPressPayload,
 } from "./ActivityBarIcon";
 import { type PanelSectionDragSession } from "../panel-section/panelSectionDrag";
@@ -39,6 +40,7 @@ import {
 import "./activityBar.css";
 
 export type { ActivityBarDragSession } from "./activityBarDrag";
+export type { ActivityBarIconRenderer } from "./ActivityBarIcon";
 
 /**
  * @constant POINTER_TARGET_HYSTERESIS_PX
@@ -177,6 +179,7 @@ export function ActivityBar(props: {
   bar: ActivityBarStateItem | null;
   dragSession?: ActivityBarDragSession | null;
   panelDragSession?: PanelSectionDragSession | null;
+  renderIcon?: ActivityBarIconRenderer;
   onDragSessionChange?: (session: ActivityBarDragSession | null) => void;
   onDragSessionEnd?: (session: ActivityBarDragSession) => void;
   onPanelDragSessionChange?: (session: PanelSectionDragSession | null) => void;
@@ -188,6 +191,7 @@ export function ActivityBar(props: {
     bar,
     dragSession: controlledDragSession,
     panelDragSession,
+    renderIcon,
     onDragSessionChange,
     onDragSessionEnd,
     onPanelDragSessionChange,
@@ -484,6 +488,7 @@ export function ActivityBar(props: {
                 icon={icon}
                 selected={activityBar.selectedIconId === icon.id}
                 dragging={dragSession?.phase === "dragging" && dragSession.iconId === icon.id}
+                renderIcon={renderIcon}
                 onSelect={() => {
                   onActivateIcon?.(icon.id);
                   if (icon.activationMode !== "action") {

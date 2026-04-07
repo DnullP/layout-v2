@@ -89,7 +89,7 @@ export function PanelSectionUsageExample(): ReactNode {
             committedLeafSectionId="left-sidebar-leaf"
             panelSectionId="left-panel"
             panelSection={panelSections.getSection("left-panel")}
-            onActivatePanel={() => {}}
+            onActivatePanel={() => { }}
             onFocusPanel={(panelId) => panelSections.focusPanel("left-panel", panelId)}
             onToggleCollapsed={() => {
                 const current = panelSections.getSection("left-panel");

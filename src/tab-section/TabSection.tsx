@@ -62,6 +62,8 @@ export type {
  */
 export type TabSectionContentRenderer = (tab: TabSectionTabDefinition) => ReactNode;
 
+export type TabSectionTitleRenderer = (tab: TabSectionTabDefinition) => ReactNode;
+
 /**
  * @type TabSectionContentRendererRegistry
  * @description 基于 tab.type 分发的内容渲染注册表。
@@ -266,6 +268,7 @@ export function TabSection(props: {
   allowContentPreview?: boolean;
   contentRegistry?: TabSectionContentRendererRegistry;
   renderTabContent?: TabSectionContentRenderer;
+  renderTabTitle?: TabSectionTitleRenderer;
   onDragSessionChange?: (session: TabSectionDragSession | null) => void;
   onDragSessionEnd?: (session: TabSectionDragSession) => void;
   onFocusTab: (tabId: string) => void;
@@ -282,6 +285,7 @@ export function TabSection(props: {
     allowContentPreview = false,
     contentRegistry,
     renderTabContent,
+    renderTabTitle,
     onDragSessionChange,
     onDragSessionEnd,
     onFocusTab,
@@ -683,7 +687,9 @@ export function TabSection(props: {
                     }));
                   }}
                 >
-                  <span className="layout-v2-tab-section__tab-title">{tab.title}</span>
+                  <span className="layout-v2-tab-section__tab-title">
+                    {renderTabTitle ? renderTabTitle(tab) : tab.title}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -711,7 +717,9 @@ export function TabSection(props: {
       >
         {activeCard && !shouldHideActiveCard ? (
           <div className={["layout-v2-tab-section__card", getCardToneClassName(activeCard.tone)].join(" ")}>
-            <div className="layout-v2-tab-section__card-title">{activeCard.title}</div>
+            <div className="layout-v2-tab-section__card-title">
+              {renderTabTitle ? renderTabTitle(activeCard) : activeCard.title}
+            </div>
             <div className="layout-v2-tab-section__card-body">{resolveTabCardBody(activeCard, renderTabContent, contentRegistry)}</div>
           </div>
         ) : (

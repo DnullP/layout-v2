@@ -5,6 +5,7 @@ import {
     insertPanelSectionPanel,
     movePanelSectionPanel,
     setPanelSectionCollapsed,
+    updatePanelMetadata,
 } from "../src";
 
 describe("panelSectionModel", () => {
@@ -99,5 +100,27 @@ describe("panelSectionModel", () => {
 
         expect(collapsedState.sections["main-panel"]?.isCollapsed).toBe(true);
         expect(expandedState.sections["main-panel"]?.isCollapsed).toBe(false);
+    });
+
+    test("应支持为 panel 挂载宿主元数据", () => {
+        const state = createPanelSectionsState([
+            {
+                id: "main-panel",
+                panels: [
+                    { id: "terminal", label: "Terminal", symbol: "T", content: "Terminal pane" },
+                ],
+                focusedPanelId: "terminal",
+                isCollapsed: false,
+            },
+        ]);
+
+        const nextState = updatePanelMetadata(state, "main-panel", "terminal", (meta) => ({
+            ...meta,
+            lifecycleScope: "workspace",
+        }));
+
+        expect(nextState.sections["main-panel"]?.panels[0]?.meta).toEqual({
+            lifecycleScope: "workspace",
+        });
     });
 });

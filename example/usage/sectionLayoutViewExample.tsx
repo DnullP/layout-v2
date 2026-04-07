@@ -160,7 +160,7 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                             activityBars.resetState(removeActivityBarIcon(activityBars.state, session.currentBarId, session.iconId));
                         }}
                         onPanelDragSessionChange={setPanelDragSession}
-                        onActivateIcon={() => {}}
+                        onActivateIcon={() => { }}
                         onSelectIcon={(iconId) => activityBars.selectIcon(activityBinding.props.barId, iconId)}
                         onMoveIcon={(move) => activityBars.moveIcon(move)}
                     />
@@ -215,7 +215,7 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                             panelSections.resetState(preview.state);
                         }}
                         onActivityDragSessionChange={setActivityDragSession}
-                        onActivatePanel={() => {}}
+                        onActivatePanel={() => { }}
                         onFocusPanel={(panelId) => panelSections.focusPanel(panelBinding.props.panelSectionId, panelId)}
                         onToggleCollapsed={() => {
                             const current = panelSections.state.sections[panelBinding.props.panelSectionId] ?? null;

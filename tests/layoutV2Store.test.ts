@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     createVSCodeLayoutState,
+    exportVSCodeLayoutSnapshot,
     createVSCodeLayoutStore,
     createRootSection,
     createSectionComponentBinding,
@@ -52,6 +53,7 @@ describe("vscode layout store", () => {
         expect(state.activityBars.bars["primary-activity-bar"]?.icons).toHaveLength(1);
         expect(state.tabSections.sections["main-tabs"]?.tabs[0]?.id).toBe("welcome");
         expect(state.panelSections.sections["left-panel"]?.panels[0]?.id).toBe("panel-files");
+        expect(state.workbench?.activeGroupId).toBe("main-tabs");
     });
 
     test("应支持通过统一 store 对布局与 section 状态进行操控", () => {
@@ -224,5 +226,141 @@ describe("vscode layout store", () => {
         });
 
         unsubscribe();
+    });
+
+    test("应提供宿主级 metadata、lifecycle hooks 与 reason 上下文", () => {
+        const store = createVSCodeLayoutStore({
+            initialState: createVSCodeLayoutState({
+                root: createTestRoot(),
+                tabSections: [{
+                    id: "main-tabs",
+                    tabs: [{ id: "welcome", title: "Welcome", content: "Welcome page" }],
+                    focusedTabId: "welcome",
+                    isRoot: true,
+                }],
+            }),
+        });
+
+        const lifecycleEvents: string[] = [];
+        store.addLifecycleHook((event) => {
+            lifecycleEvents.push(`${event.phase}:${event.command}:${event.reason ?? "none"}`);
+        });
+
+        store.updateTabSectionMetadata("main-tabs", (meta) => ({
+            ...meta,
+            componentId: "editor-group",
+            stateKey: "workspace:main",
+        }), {
+            reason: "restore",
+            metadata: {
+                requestId: "req-1",
+            },
+        });
+
+        store.updateSectionMetadata("root", (meta) => ({
+            ...meta,
+            lifecycleScope: "workbench",
+        }));
+
+        expect(store.getTabSection("main-tabs")?.meta).toEqual({
+            componentId: "editor-group",
+            stateKey: "workspace:main",
+        });
+        expect(store.getSection("root")?.meta).toEqual({
+            lifecycleScope: "workbench",
+        });
+        expect(lifecycleEvents).toEqual([
+            "before:update-tab-section-metadata:restore",
+            "after:update-tab-section-metadata:restore",
+            "before:update-section-metadata:none",
+            "after:update-section-metadata:none",
+        ]);
+    });
+
+    test("应支持 workbench group 查询、跨 group 移动与 snapshot 导入导出", () => {
+        const store = createVSCodeLayoutStore({
+            initialState: createVSCodeLayoutState({
+                root: createTestRoot(),
+                tabSections: [
+                    {
+                        id: "main-tabs",
+                        tabs: [{ id: "welcome", title: "Welcome", content: "Welcome page" }],
+                        focusedTabId: "welcome",
+                        isRoot: true,
+                    },
+                    {
+                        id: "secondary-tabs",
+                        tabs: [{ id: "notes", title: "Notes", content: "Notes page" }],
+                        focusedTabId: "notes",
+                    },
+                ],
+            }),
+        });
+
+        expect(store.listGroups().map((group) => group.id)).toEqual([
+            "main-tabs",
+            "secondary-tabs",
+        ]);
+        expect(store.getActiveGroup()?.id).toBe("main-tabs");
+
+        store.setActiveGroup("secondary-tabs");
+        store.moveTabAcrossGroups({
+            sourceGroupId: "main-tabs",
+            targetGroupId: "secondary-tabs",
+            tabId: "welcome",
+            targetIndex: 1,
+        }, {
+            reason: "user-drag",
+        });
+
+        const snapshot = store.exportSnapshot({
+            version: "2",
+            metadata: {
+                source: "unit-test",
+            },
+        });
+
+        const importedStore = createVSCodeLayoutStore({
+            initialState: createVSCodeLayoutState({
+                root: createTestRoot(),
+            }),
+        });
+
+        importedStore.importSnapshot(snapshot, {
+            version: "2",
+        });
+
+        expect(snapshot.metadata).toEqual({
+            source: "unit-test",
+        });
+        expect(importedStore.getActiveGroup()?.id).toBe("secondary-tabs");
+        expect(importedStore.getTabSection("secondary-tabs")?.tabs.map((tab) => tab.id)).toEqual([
+            "notes",
+            "welcome",
+        ]);
+    });
+
+    test("应支持单独导出 snapshot 工具函数", () => {
+        const state = createVSCodeLayoutState({
+            root: createTestRoot(),
+            tabSections: [{
+                id: "main-tabs",
+                tabs: [{ id: "welcome", title: "Welcome", content: "Welcome page" }],
+                focusedTabId: "welcome",
+                isRoot: true,
+            }],
+        });
+
+        const snapshot = exportVSCodeLayoutSnapshot(state, {
+            version: 3,
+            metadata: {
+                sourceParams: {
+                    workspaceId: "demo",
+                },
+            },
+        });
+
+        expect(snapshot.version).toBe(3);
+        expect(snapshot.state.workbench?.activeGroupId).toBe("main-tabs");
     });
 });

@@ -39,6 +39,12 @@
  *   - findTabInSectionsState   在所有 section 中查找 tab
  */
 
+import {
+  updateLayoutMetadata,
+  type LayoutHostMetadata,
+  type LayoutHostMetadataUpdater,
+} from "../hostMetadata";
+
 /**
  * @type TabSectionTabType
  * @description tab 内容类型标识。
@@ -69,6 +75,8 @@ export interface TabSectionTabDefinition {
   content: string;
   /** card 的视觉语义色。 */
   tone?: "neutral" | "blue" | "green" | "amber" | "red";
+  /** 宿主侧挂载的元数据。 */
+  meta?: LayoutHostMetadata;
 }
 
 /**
@@ -88,6 +96,8 @@ export interface TabSectionStateItem {
   focusedTabId: string | null;
   /** 是否为 root tab section；root 清空后不自动销毁。 */
   isRoot?: boolean;
+  /** 宿主侧挂载的元数据。 */
+  meta?: LayoutHostMetadata;
 }
 
 /**
@@ -296,6 +306,82 @@ export function removeTabSection(
   delete nextSections[sectionId];
   return {
     sections: nextSections,
+  };
+}
+
+/**
+ * @function updateTabSectionMetadata
+ * @description 更新指定 tab section 的宿主元数据。
+ * @param state 全部状态。
+ * @param sectionId section 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updateTabSectionMetadata(
+  state: TabSectionsState,
+  sectionId: string,
+  updater: LayoutHostMetadataUpdater,
+): TabSectionsState {
+  const section = getTabSectionById(state, sectionId);
+  if (!section) {
+    return state;
+  }
+
+  const nextSection = updateLayoutMetadata(section, updater);
+  if (nextSection === section) {
+    return state;
+  }
+
+  return {
+    sections: {
+      ...state.sections,
+      [sectionId]: nextSection,
+    },
+  };
+}
+
+/**
+ * @function updateTabMetadata
+ * @description 更新指定 tab 的宿主元数据。
+ * @param state 全部状态。
+ * @param sectionId section 标识。
+ * @param tabId tab 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updateTabMetadata(
+  state: TabSectionsState,
+  sectionId: string,
+  tabId: string,
+  updater: LayoutHostMetadataUpdater,
+): TabSectionsState {
+  const section = getTabSectionById(state, sectionId);
+  if (!section) {
+    return state;
+  }
+
+  const tabIndex = section.tabs.findIndex((tab) => tab.id === tabId);
+  if (tabIndex < 0) {
+    return state;
+  }
+
+  const currentTab = section.tabs[tabIndex];
+  const nextTab = updateLayoutMetadata(currentTab, updater);
+  if (nextTab === currentTab) {
+    return state;
+  }
+
+  const nextTabs = [...section.tabs];
+  nextTabs[tabIndex] = nextTab;
+
+  return {
+    sections: {
+      ...state.sections,
+      [sectionId]: {
+        ...section,
+        tabs: nextTabs,
+      },
+    },
   };
 }
 

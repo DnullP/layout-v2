@@ -28,6 +28,10 @@ export type {
     PanelSectionSplitSide,
 } from "./panelSectionDrag";
 
+export type PanelSectionTabRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
+
+export type PanelSectionContentRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
+
 const PANEL_BAR_HYSTERESIS_PX = 8;
 
 const DRAG_START_DISTANCE_PX = 4;
@@ -141,6 +145,8 @@ export function PanelSection(props: {
     activityDragSession?: ActivityBarDragSession | null;
     interactive?: boolean;
     allowContentPreview?: boolean;
+    renderPanelTab?: PanelSectionTabRenderer;
+    renderPanelContent?: PanelSectionContentRenderer;
     onDragSessionChange?: (session: PanelSectionDragSession | null) => void;
     onDragSessionEnd?: (session: PanelSectionDragSession) => void;
     onActivityDragSessionChange?: (session: ActivityBarDragSession | null) => void;
@@ -158,6 +164,8 @@ export function PanelSection(props: {
         activityDragSession,
         interactive = true,
         allowContentPreview = false,
+        renderPanelTab,
+        renderPanelContent,
         onDragSessionChange,
         onDragSessionEnd,
         onActivityDragSessionChange,
@@ -583,7 +591,9 @@ export function PanelSection(props: {
                                         }));
                                     }}
                                 >
-                                    <span className="layout-v2-panel-section__panel-symbol">{panel.symbol}</span>
+                                    {renderPanelTab ? renderPanelTab(panel) : (
+                                        <span className="layout-v2-panel-section__panel-symbol">{panel.symbol}</span>
+                                    )}
                                 </button>
                             )}
                         </div>
@@ -617,7 +627,9 @@ export function PanelSection(props: {
                                 <span className="layout-v2-panel-section__pane-symbol">{activePanel.symbol}</span>
                                 <span className="layout-v2-panel-section__pane-title">{activePanel.label}</span>
                             </div>
-                            <div className="layout-v2-panel-section__pane-body">{activePanel.content}</div>
+                            <div className="layout-v2-panel-section__pane-body">
+                                {renderPanelContent ? renderPanelContent(activePanel) : activePanel.content}
+                            </div>
                         </div>
                     ) : (
                         <div className="layout-v2-panel-section__empty-pane">Drop panel here or pick one from the bar</div>

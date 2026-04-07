@@ -7,6 +7,12 @@
  *   - none
  */
 
+import {
+    updateLayoutMetadata,
+    type LayoutHostMetadata,
+    type LayoutHostMetadataUpdater,
+} from "../hostMetadata";
+
 /**
  * @interface PanelSectionPanelDefinition
  * @description panel 定义。
@@ -29,6 +35,8 @@ export interface PanelSectionPanelDefinition {
     activationMode?: "focus" | "action";
     /** pane 视觉语义色。 */
     tone?: "neutral" | "blue" | "green" | "amber" | "red";
+    /** 宿主侧挂载的元数据。 */
+    meta?: LayoutHostMetadata;
 }
 
 /**
@@ -51,6 +59,8 @@ export interface PanelSectionStateItem {
     isCollapsed: boolean;
     /** 是否为 root panel section；root 清空后不自动销毁。 */
     isRoot?: boolean;
+    /** 宿主侧挂载的元数据。 */
+    meta?: LayoutHostMetadata;
 }
 
 /**
@@ -289,6 +299,82 @@ export function removePanelSection(
     delete nextSections[sectionId];
     return {
         sections: nextSections,
+    };
+}
+
+/**
+ * @function updatePanelSectionMetadata
+ * @description 更新指定 panel section 的宿主元数据。
+ * @param state 全部状态。
+ * @param sectionId section 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updatePanelSectionMetadata(
+    state: PanelSectionsState,
+    sectionId: string,
+    updater: LayoutHostMetadataUpdater,
+): PanelSectionsState {
+    const section = getPanelSectionById(state, sectionId);
+    if (!section) {
+        return state;
+    }
+
+    const nextSection = updateLayoutMetadata(section, updater);
+    if (nextSection === section) {
+        return state;
+    }
+
+    return {
+        sections: {
+            ...state.sections,
+            [sectionId]: nextSection,
+        },
+    };
+}
+
+/**
+ * @function updatePanelMetadata
+ * @description 更新指定 panel 的宿主元数据。
+ * @param state 全部状态。
+ * @param sectionId section 标识。
+ * @param panelId panel 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updatePanelMetadata(
+    state: PanelSectionsState,
+    sectionId: string,
+    panelId: string,
+    updater: LayoutHostMetadataUpdater,
+): PanelSectionsState {
+    const section = getPanelSectionById(state, sectionId);
+    if (!section) {
+        return state;
+    }
+
+    const panelIndex = section.panels.findIndex((panel) => panel.id === panelId);
+    if (panelIndex < 0) {
+        return state;
+    }
+
+    const currentPanel = section.panels[panelIndex];
+    const nextPanel = updateLayoutMetadata(currentPanel, updater);
+    if (nextPanel === currentPanel) {
+        return state;
+    }
+
+    const nextPanels = [...section.panels];
+    nextPanels[panelIndex] = nextPanel;
+
+    return {
+        sections: {
+            ...state.sections,
+            [sectionId]: {
+                ...section,
+                panels: nextPanels,
+            },
+        },
     };
 }
 

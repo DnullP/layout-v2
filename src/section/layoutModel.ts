@@ -5,6 +5,12 @@
  *   不依赖 React，可直接用于状态管理、序列化与测试。
  */
 
+import {
+    updateLayoutMetadata,
+    type LayoutHostMetadata,
+    type LayoutHostMetadataUpdater,
+} from "../hostMetadata";
+
 export const MIN_SPLIT_RATIO = 0.15;
 
 export type SectionEdge = "top" | "right" | "bottom" | "left";
@@ -27,6 +33,7 @@ export interface SectionDraft<T> {
     title?: string;
     data: T;
     resizableEdges?: Partial<SectionResizableEdges>;
+    meta?: LayoutHostMetadata;
 }
 
 export interface SectionSplitState<T> {
@@ -40,6 +47,7 @@ export interface SectionNode<T> {
     title: string;
     data: T;
     resizableEdges: SectionResizableEdges;
+    meta?: LayoutHostMetadata;
     split: SectionSplitState<T> | null;
 }
 
@@ -82,6 +90,7 @@ export function createSectionNode<T>(draft: SectionDraft<T>): SectionNode<T> {
         title: draft.title ?? "Untitled Section",
         data: draft.data,
         resizableEdges: createSectionResizableEdges(draft.resizableEdges),
+        meta: draft.meta,
         split: null,
     };
 }
@@ -234,6 +243,7 @@ export function destroySectionTree<T>(
                     title: survivor.title,
                     data: survivor.data,
                     resizableEdges: survivor.resizableEdges,
+                    meta: survivor.meta,
                     split: survivor.split,
                 },
                 matched: true,
@@ -324,6 +334,14 @@ export function updateSectionTree<T>(
     }
 
     return result.nextNode;
+}
+
+export function updateSectionMetadata<T>(
+    root: SectionNode<T>,
+    sectionId: string,
+    updater: LayoutHostMetadataUpdater,
+): SectionNode<T> {
+    return updateSectionTree(root, sectionId, (section) => updateLayoutMetadata(section, updater));
 }
 
 export function collectLeafSections<T>(node: SectionNode<T>): SectionNode<T>[] {

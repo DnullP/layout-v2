@@ -49,7 +49,7 @@ export function ActivityBarUsageExample(): ReactNode {
     return (
         <ActivityBar
             bar={activityBars.getBar("primary-activity-bar")}
-            onActivateIcon={() => {}}
+            onActivateIcon={() => { }}
             onSelectIcon={(iconId) => activityBars.selectIcon("primary-activity-bar", iconId)}
             onMoveIcon={(move) => activityBars.moveIcon(move)}
         />

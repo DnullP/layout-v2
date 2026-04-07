@@ -34,6 +34,12 @@
  *   - getActivityBarById           按 ID 获取 activity bar
  */
 
+import {
+  updateLayoutMetadata,
+  type LayoutHostMetadata,
+  type LayoutHostMetadataUpdater,
+} from "../hostMetadata";
+
 /**
  * @interface ActivityBarIconDefinition
  * @description activity bar icon 的数据定义。
@@ -50,6 +56,8 @@ export interface ActivityBarIconDefinition {
   symbol: string;
   /** 点击后是切换选中态还是仅触发外部动作。 */
   activationMode?: "focus" | "action";
+  /** 宿主侧挂载的元数据。 */
+  meta?: LayoutHostMetadata;
 }
 
 /**
@@ -66,6 +74,8 @@ export interface ActivityBarStateItem {
   icons: ActivityBarIconDefinition[];
   /** 当前选中的 icon 标识。 */
   selectedIconId: string | null;
+  /** 宿主侧挂载的元数据。 */
+  meta?: LayoutHostMetadata;
 }
 
 /**
@@ -223,6 +233,82 @@ export function insertActivityBarIcon(
         ...bar,
         icons: nextIcons,
         selectedIconId: icon.id,
+      },
+    },
+  };
+}
+
+/**
+ * @function updateActivityBarMetadata
+ * @description 更新指定 activity bar 的宿主元数据。
+ * @param state activity bar 状态。
+ * @param barId activity bar 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updateActivityBarMetadata(
+  state: ActivityBarsState,
+  barId: string,
+  updater: LayoutHostMetadataUpdater,
+): ActivityBarsState {
+  const bar = getActivityBarById(state, barId);
+  if (!bar) {
+    return state;
+  }
+
+  const nextBar = updateLayoutMetadata(bar, updater);
+  if (nextBar === bar) {
+    return state;
+  }
+
+  return {
+    bars: {
+      ...state.bars,
+      [barId]: nextBar,
+    },
+  };
+}
+
+/**
+ * @function updateActivityBarIconMetadata
+ * @description 更新指定 activity icon 的宿主元数据。
+ * @param state activity bar 状态。
+ * @param barId activity bar 标识。
+ * @param iconId icon 标识。
+ * @param updater 元数据更新函数。
+ * @returns 更新后的状态。
+ */
+export function updateActivityBarIconMetadata(
+  state: ActivityBarsState,
+  barId: string,
+  iconId: string,
+  updater: LayoutHostMetadataUpdater,
+): ActivityBarsState {
+  const bar = getActivityBarById(state, barId);
+  if (!bar) {
+    return state;
+  }
+
+  const iconIndex = bar.icons.findIndex((icon) => icon.id === iconId);
+  if (iconIndex < 0) {
+    return state;
+  }
+
+  const currentIcon = bar.icons[iconIndex];
+  const nextIcon = updateLayoutMetadata(currentIcon, updater);
+  if (nextIcon === currentIcon) {
+    return state;
+  }
+
+  const nextIcons = [...bar.icons];
+  nextIcons[iconIndex] = nextIcon;
+
+  return {
+    bars: {
+      ...state.bars,
+      [barId]: {
+        ...bar,
+        icons: nextIcons,
       },
     },
   };

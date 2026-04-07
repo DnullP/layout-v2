@@ -9,6 +9,7 @@ import {
   createTabSectionsState,
   focusTabSectionTab,
   moveTabSectionTab,
+  updateTabMetadata,
 } from "../src";
 
 describe("tabSectionModel", () => {
@@ -155,6 +156,27 @@ describe("tabSectionModel", () => {
         headline: "Workspace Overview",
         items: ["recent", "pinned"],
       },
+    });
+  });
+
+  test("应支持为 tab 挂载宿主元数据", () => {
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [
+          { id: "welcome", title: "Welcome", content: "Welcome card" },
+        ],
+        focusedTabId: "welcome",
+      },
+    ]);
+
+    const nextState = updateTabMetadata(state, "main-tabs", "welcome", (meta) => ({
+      ...meta,
+      stateKey: "workspace:welcome",
+    }));
+
+    expect(nextState.sections["main-tabs"]?.tabs[0]?.meta).toEqual({
+      stateKey: "workspace:welcome",
     });
   });
 });

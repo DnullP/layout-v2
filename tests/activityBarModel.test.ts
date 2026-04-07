@@ -8,6 +8,7 @@ import {
   createActivityBarState,
   moveActivityBarIcon,
   selectActivityBarIcon,
+  updateActivityBarIconMetadata,
 } from "../src/activity-bar/activityBarModel";
 
 describe("activityBarModel", () => {
@@ -112,5 +113,28 @@ describe("activityBarModel", () => {
       "search",
     ]);
     expect(nextState.bars.secondary.selectedIconId).toBe("search");
+  });
+
+  test("应支持为 activity icon 挂载宿主元数据", () => {
+    const state = createActivityBarState([
+      {
+        id: "primary",
+        icons: [
+          { id: "explorer", label: "Explorer", symbol: "E" },
+        ],
+        selectedIconId: "explorer",
+      },
+    ]);
+
+    const nextState = updateActivityBarIconMetadata(state, "primary", "explorer", (meta) => ({
+      ...meta,
+      componentId: "explorer-view",
+      restorePolicy: "sticky",
+    }));
+
+    expect(nextState.bars.primary.icons[0]?.meta).toEqual({
+      componentId: "explorer-view",
+      restorePolicy: "sticky",
+    });
   });
 });

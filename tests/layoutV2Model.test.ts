@@ -13,6 +13,7 @@ import {
   resizeSectionSplit,
   resetSectionSequenceForTest,
   splitSectionTree,
+  updateSectionMetadata,
 } from "../src";
 import { createSectionTreeExample } from "../example/usage/sectionTreeExample";
 
@@ -246,5 +247,22 @@ describe("layout-v2 layout model", () => {
     expect(() => destroySectionTree(root, "root")).toThrow(
       "[layout-v2] root section cannot be destroyed: root",
     );
+  });
+
+  test("应支持为 section 挂载宿主元数据", () => {
+    const root = createRootSection({
+      id: "root",
+      title: "Root",
+      data: { kind: "root" },
+    });
+
+    const nextRoot = updateSectionMetadata(root, "root", (meta) => ({
+      ...meta,
+      componentId: "workbench-root",
+    }));
+
+    expect(nextRoot.meta).toEqual({
+      componentId: "workbench-root",
+    });
   });
 });

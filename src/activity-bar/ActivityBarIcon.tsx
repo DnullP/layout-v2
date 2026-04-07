@@ -23,6 +23,8 @@ import { type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { type ActivityBarIconDefinition } from "./activityBarModel";
 import "./activityBar.css";
 
+export type ActivityBarIconRenderer = (icon: ActivityBarIconDefinition) => ReactNode;
+
 /**
  * @interface ActivityBarDragPayload
  * @description activity icon 的拖拽载荷。
@@ -68,10 +70,11 @@ export function ActivityBarIcon(props: {
   icon: ActivityBarIconDefinition;
   selected: boolean;
   dragging: boolean;
+  renderIcon?: ActivityBarIconRenderer;
   onSelect: () => void;
   onPointerPress: (payload: ActivityBarPointerPressPayload) => void;
 }): ReactNode {
-  const { barId, index, icon, selected, dragging, onSelect, onPointerPress } = props;
+  const { barId, index, icon, selected, dragging, renderIcon, onSelect, onPointerPress } = props;
   const className = [
     "layout-v2-activity-bar__icon",
     selected ? "layout-v2-activity-bar__icon--selected" : "",
@@ -110,7 +113,9 @@ export function ActivityBarIcon(props: {
       data-icon-id={icon.id}
       onPointerDown={handlePointerDown}
     >
-      <span className="layout-v2-activity-bar__icon-symbol">{icon.symbol}</span>
+      {renderIcon ? renderIcon(icon) : (
+        <span className="layout-v2-activity-bar__icon-symbol">{icon.symbol}</span>
+      )}
     </button>
   );
 }
