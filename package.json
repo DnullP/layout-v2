@@ -37,7 +37,8 @@
       "types": "./dist/vscode-layout/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    }
+    },
+    "./styles.css": "./dist/layout-v2.css"
   },
   "files": [
     "dist",

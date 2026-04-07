@@ -9,6 +9,7 @@ export * from "../hostMetadata";
 export * from "./store";
 export * from "./focusBridge";
 export * from "./renderAdapters";
+export * from "./tabWorkbench";
 export * from "../activity-bar/activityBarModel";
 export * from "../activity-bar/activityBarDrag";
 export * from "../activity-bar/useActivityBarState";

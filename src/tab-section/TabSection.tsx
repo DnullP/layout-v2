@@ -60,6 +60,8 @@ export type {
   TabSectionSplitSide,
 } from "./tabSectionDrag";
 
+export type { TabSectionTabDefinition } from "./tabSectionModel";
+
 /**
  * @type TabSectionContentRenderer
  * @description 单个 tab 内容渲染函数。

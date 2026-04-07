@@ -54,6 +54,12 @@ After pushing to GitHub, install it in another project with a Git dependency, fo
 npm install github:<owner>/layout-v2
 ```
 
+Import the compiled base styles explicitly in the host app:
+
+```ts
+import "layout-v2/styles.css";
+```
+
 ## Public API Layer
 
 External applications can now integrate through a single export layer instead of directly combining internal reducers and models.
@@ -117,5 +123,39 @@ The public facade exposes three kinds of capability:
 - `createVSCodeLayoutState(...)` for assembling a complete initial snapshot
 - `createVSCodeLayoutStore(...)` for subscribing to and mutating the snapshot
 - `useVSCodeLayoutStoreState(...)` for consuming the store inside React
+
+For hosts that need real tab workbench behavior instead of demo-only glue code, `layout-v2` now also exposes tab workbench helpers that turn `TabSectionDragSession` into reusable preview and commit state transitions:
+
+```ts
+import {
+	buildTabWorkbenchPreviewState,
+	commitTabWorkbenchDrop,
+	createSectionComponentBinding,
+	type SectionDraft,
+} from "layout-v2";
+
+const adapter = {
+	createTabSectionDraft: ({ sourceLeaf, nextSectionId, nextTabSectionId, title }): SectionDraft<MySectionData> => ({
+		id: nextSectionId,
+		title,
+		data: {
+			...sourceLeaf.data,
+			component: createSectionComponentBinding("tab-section", {
+				tabSectionId: nextTabSectionId,
+			}),
+		},
+		resizableEdges: sourceLeaf.resizableEdges,
+		meta: sourceLeaf.meta,
+	}),
+};
+
+const preview = buildTabWorkbenchPreviewState(root, tabSections, dragSession, adapter);
+const committed = commitTabWorkbenchDrop(root, tabSections, dragSession, adapter);
+```
+
+These helpers intentionally keep host-specific concerns outside the engine:
+
+- The host still owns tab payloads, renderers, persistence, and business side effects.
+- The engine now owns preview split planning, empty-group cleanup, and committed tab-group creation.
 
 Examples and demo-only helpers are intentionally not re-exported from the package root.

@@ -32,6 +32,8 @@ export type {
     PanelSectionSplitSide,
 } from "./panelSectionDrag";
 
+export type { PanelSectionPanelDefinition } from "./panelSectionModel";
+
 export type PanelSectionTabRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
 
 export type PanelSectionContentRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
