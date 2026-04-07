@@ -15,6 +15,7 @@ import {
 } from "react";
 import {
     canResizeSectionSplit,
+    isSectionHidden,
     type SectionNode,
     type SectionSplitDirection,
 } from "./layoutModel";
@@ -300,11 +301,48 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
         };
     }, [node.id, onSplitAnimationComplete, splitAnimation?.token]);
 
+    if (isSectionHidden(node)) {
+        return null;
+    }
+
     if (!node.split) {
         return <Section sectionId={node.id}>{renderSection(node)}</Section>;
     }
 
     const [firstChild, secondChild] = node.split.children;
+    const isFirstChildHidden = isSectionHidden(firstChild);
+    const isSecondChildHidden = isSectionHidden(secondChild);
+
+    if (isFirstChildHidden && isSecondChildHidden) {
+        return null;
+    }
+
+    if (isFirstChildHidden) {
+        return (
+            <SectionNodeView
+                node={secondChild}
+                renderSection={renderSection}
+                onResizeSection={onResizeSection}
+                minSectionSize={minSectionSize}
+                splitAnimations={splitAnimations}
+                onSplitAnimationComplete={onSplitAnimationComplete}
+            />
+        );
+    }
+
+    if (isSecondChildHidden) {
+        return (
+            <SectionNodeView
+                node={firstChild}
+                renderSection={renderSection}
+                onResizeSection={onResizeSection}
+                minSectionSize={minSectionSize}
+                splitAnimations={splitAnimations}
+                onSplitAnimationComplete={onSplitAnimationComplete}
+            />
+        );
+    }
+
     const branchClassName = [
         "layout-v2__branch",
         node.split.direction === "horizontal"

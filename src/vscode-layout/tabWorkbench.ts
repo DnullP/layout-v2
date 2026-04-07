@@ -210,6 +210,10 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
 
       const context = findTabSectionLeafContext(nextRoot, tabSectionId, adapter);
       if (!context) {
+        if (tabSection.isRoot) {
+          continue;
+        }
+
         const nextSections = { ...nextState.sections };
         delete nextSections[tabSectionId];
         nextState = tabSection.isRoot
@@ -219,8 +223,7 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
         break;
       }
 
-      const canCollapseProtectedRoot = Boolean(tabSection.isRoot && context.parent);
-      if (tabSection.isRoot && !canCollapseProtectedRoot) {
+      if (tabSection.isRoot) {
         continue;
       }
 

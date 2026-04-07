@@ -110,6 +110,18 @@
     cursor: default;
 }
 
+.layout-v2__divider--horizontal.layout-v2__divider--disabled {
+    width: 0;
+}
+
+.layout-v2__divider--vertical.layout-v2__divider--disabled {
+    height: 0;
+}
+
+.layout-v2__divider--disabled .layout-v2__divider-line {
+    display: none;
+}
+
 .layout-v2__divider-line {
     background: rgba(148, 148, 148, 0.72);
     transition:

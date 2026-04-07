@@ -41,7 +41,9 @@ import {
     destroySectionTree,
     findSectionNode,
     resizeSectionSplit,
+    setSectionHidden,
     splitSectionTree,
+    toggleSectionHidden,
     updateSectionMetadata,
     updateSectionTree,
     type SectionNode,
@@ -138,6 +140,8 @@ export type VSCodeLayoutCommandName =
     | "split-section"
     | "destroy-section"
     | "resize-section"
+    | "set-section-hidden"
+    | "toggle-section-hidden"
     | "update-section"
     | "update-section-metadata"
     | "reset-layout"
@@ -225,6 +229,15 @@ export interface VSCodeLayoutStore<T> {
     resizeSection: (
         sectionId: string,
         ratio: number,
+        commandOptions?: VSCodeLayoutCommandOptions,
+    ) => void;
+    setSectionHidden: (
+        sectionId: string,
+        isHidden: boolean,
+        commandOptions?: VSCodeLayoutCommandOptions,
+    ) => void;
+    toggleSectionHidden: (
+        sectionId: string,
         commandOptions?: VSCodeLayoutCommandOptions,
     ) => void;
     updateSection: (
@@ -637,6 +650,28 @@ export function createVSCodeLayoutStore<T>(
                 (currentState) => ({
                     ...currentState,
                     root: resizeSectionSplit(currentState.root, sectionId, ratio),
+                }),
+                commandOptions,
+            );
+        },
+        setSectionHidden: (sectionId, isHidden, commandOptions) => {
+            runCommand(
+                "set-section-hidden",
+                { sectionId, isHidden },
+                (currentState) => ({
+                    ...currentState,
+                    root: setSectionHidden(currentState.root, sectionId, isHidden),
+                }),
+                commandOptions,
+            );
+        },
+        toggleSectionHidden: (sectionId, commandOptions) => {
+            runCommand(
+                "toggle-section-hidden",
+                { sectionId },
+                (currentState) => ({
+                    ...currentState,
+                    root: toggleSectionHidden(currentState.root, sectionId),
                 }),
                 commandOptions,
             );

@@ -214,7 +214,7 @@ describe("tabWorkbench helpers", () => {
     expect(newGroup?.id ?? null).toBe(committed?.activeTabSectionId ?? null);
   });
 
-  test("cleanup 应在空 root tab section 被折叠后转移 root 标记", () => {
+  test("cleanup 不应销毁空 root tab section", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
     );
@@ -255,7 +255,9 @@ describe("tabWorkbench helpers", () => {
 
     const cleaned = cleanupEmptyTabWorkbenchSections(root, state, adapter);
 
-    expect(cleaned.state.sections["main-tabs"]).toBeUndefined();
-    expect(cleaned.state.sections["review-tabs"]?.isRoot).toBe(true);
+    expect(cleaned.state.sections["main-tabs"]?.isRoot).toBe(true);
+    expect(cleaned.state.sections["main-tabs"]?.tabs).toEqual([]);
+    expect(cleaned.state.sections["review-tabs"]?.isRoot).toBe(false);
+    expect(findSectionNode(cleaned.root, "root-tabs-leaf")).not.toBeNull();
   });
 });

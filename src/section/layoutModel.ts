@@ -28,6 +28,8 @@ export const SECTION_SPLIT_HORIZONTAL: SectionSplitDirection = "horizontal";
 
 export const SECTION_SPLIT_VERTICAL: SectionSplitDirection = "vertical";
 
+export const SECTION_HIDDEN_META_KEY = "layout-v2:hidden";
+
 export interface SectionDraft<T> {
     id?: string;
     title?: string;
@@ -97,6 +99,45 @@ export function createSectionNode<T>(draft: SectionDraft<T>): SectionNode<T> {
 
 export function createRootSection<T>(draft: SectionDraft<T>): SectionNode<T> {
     return createSectionNode(draft);
+}
+
+export function isSectionHidden<T>(section: SectionNode<T>): boolean {
+    return section.meta?.[SECTION_HIDDEN_META_KEY] === true;
+}
+
+export function setSectionHidden<T>(
+    root: SectionNode<T>,
+    sectionId: string,
+    isHidden: boolean,
+): SectionNode<T> {
+    return updateSectionMetadata(root, sectionId, (metadata) => {
+        if (isHidden) {
+            return {
+                ...metadata,
+                [SECTION_HIDDEN_META_KEY]: true,
+            };
+        }
+
+        if (!(SECTION_HIDDEN_META_KEY in metadata)) {
+            return metadata;
+        }
+
+        const nextMetadata = { ...metadata };
+        delete nextMetadata[SECTION_HIDDEN_META_KEY];
+        return nextMetadata;
+    });
+}
+
+export function toggleSectionHidden<T>(
+    root: SectionNode<T>,
+    sectionId: string,
+): SectionNode<T> {
+    const section = findSectionNode(root, sectionId);
+    if (!section) {
+        return root;
+    }
+
+    return setSectionHidden(root, sectionId, !isSectionHidden(section));
 }
 
 function mapSectionTree<T>(

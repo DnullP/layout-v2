@@ -5,6 +5,7 @@ import {
     createVSCodeLayoutStore,
     createRootSection,
     createSectionComponentBinding,
+    isSectionHidden,
     selectActivityBarIcon,
     updateSectionTree,
     type SectionNode,
@@ -127,6 +128,39 @@ describe("vscode layout store", () => {
         unsubscribe();
         store.removePanel("left-panel", "panel-files");
         expect(notificationCount).toBe(4);
+    });
+
+    test("应支持临时隐藏 section 并保留恢复所需的树结构信息", () => {
+        const store = createVSCodeLayoutStore({
+            initialState: createVSCodeLayoutState({
+                root: createTestRoot(),
+            }),
+        });
+
+        store.splitSection("root", "horizontal", {
+            first: {
+                id: "left",
+                title: "Left",
+                data: {
+                    role: "sidebar",
+                    component: createSectionComponentBinding("empty", {}),
+                },
+            },
+            second: {
+                id: "main",
+                title: "Main",
+                data: {
+                    role: "main",
+                    component: createSectionComponentBinding("empty", {}),
+                },
+            },
+        });
+
+        store.setSectionHidden("left", true);
+        expect(isSectionHidden(store.getSection("left")!)).toBe(true);
+
+        store.toggleSectionHidden("left");
+        expect(isSectionHidden(store.getSection("left")!)).toBe(false);
     });
 
     test("外部应用可在一次状态更新中同步切换 activity icon 与 left sidebar panel section", () => {
