@@ -37,6 +37,10 @@ import {
   type ActivityBarIconMove,
   type ActivityBarStateItem,
 } from "./activityBarModel";
+import {
+  mergeLayoutFocusAttributes,
+  type ActivityBarFocusBridge,
+} from "../vscode-layout/focusBridge";
 import "./activityBar.css";
 
 export type { ActivityBarDragSession } from "./activityBarDrag";
@@ -179,6 +183,7 @@ export function ActivityBar(props: {
   bar: ActivityBarStateItem | null;
   dragSession?: ActivityBarDragSession | null;
   panelDragSession?: PanelSectionDragSession | null;
+  focusBridge?: ActivityBarFocusBridge<ActivityBarStateItem, ActivityBarStateItem["icons"][number]>;
   renderIcon?: ActivityBarIconRenderer;
   onDragSessionChange?: (session: ActivityBarDragSession | null) => void;
   onDragSessionEnd?: (session: ActivityBarDragSession) => void;
@@ -191,6 +196,7 @@ export function ActivityBar(props: {
     bar,
     dragSession: controlledDragSession,
     panelDragSession,
+    focusBridge,
     renderIcon,
     onDragSessionChange,
     onDragSessionEnd,
@@ -458,6 +464,13 @@ export function ActivityBar(props: {
   return (
     <div
       ref={rootRef}
+      {...mergeLayoutFocusAttributes(
+        {
+          "data-layout-role": "activity-bar",
+          "data-layout-bar-id": activityBar.id,
+        },
+        focusBridge?.getBarAttributes?.(activityBar),
+      )}
       className={[
         "layout-v2-activity-bar",
         dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging"
@@ -488,6 +501,14 @@ export function ActivityBar(props: {
                 icon={icon}
                 selected={activityBar.selectedIconId === icon.id}
                 dragging={dragSession?.phase === "dragging" && dragSession.iconId === icon.id}
+                focusAttributes={mergeLayoutFocusAttributes(
+                  {
+                    "data-layout-role": "activity-icon",
+                    "data-layout-bar-id": activityBar.id,
+                    "data-layout-icon-id": icon.id,
+                  },
+                  focusBridge?.getIconAttributes?.(activityBar, icon),
+                )}
                 renderIcon={renderIcon}
                 onSelect={() => {
                   onActivateIcon?.(icon.id);

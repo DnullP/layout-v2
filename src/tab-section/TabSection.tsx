@@ -47,6 +47,10 @@ import {
   type TabSectionSplitSide,
 } from "./tabSectionDrag";
 import { type TabSectionStateItem, type TabSectionTabDefinition, type TabSectionTabMove } from "./tabSectionModel";
+import {
+  mergeLayoutFocusAttributes,
+  type TabSectionFocusBridge,
+} from "../vscode-layout/focusBridge";
 import "./tabSection.css";
 
 export type {
@@ -264,6 +268,7 @@ export function TabSection(props: {
   tabSectionId: string;
   tabSection: TabSectionStateItem | null;
   dragSession?: TabSectionDragSession | null;
+  focusBridge?: TabSectionFocusBridge<TabSectionStateItem, TabSectionTabDefinition>;
   interactive?: boolean;
   allowContentPreview?: boolean;
   contentRegistry?: TabSectionContentRendererRegistry;
@@ -281,6 +286,7 @@ export function TabSection(props: {
     tabSectionId,
     tabSection,
     dragSession: controlledDragSession,
+    focusBridge,
     interactive = true,
     allowContentPreview = false,
     contentRegistry,
@@ -637,7 +643,18 @@ export function TabSection(props: {
   );
 
   return (
-    <div ref={sectionRef} className="layout-v2-tab-section" data-tab-section-id={tabSection.id}>
+    <div
+      ref={sectionRef}
+      className="layout-v2-tab-section"
+      data-tab-section-id={tabSection.id}
+      {...mergeLayoutFocusAttributes(
+        {
+          "data-layout-role": "tab-section",
+          "data-layout-tab-section-id": tabSection.id,
+        },
+        focusBridge?.getSectionAttributes?.(tabSection),
+      )}
+    >
       <div
         ref={stripRef}
         className={[
@@ -664,6 +681,14 @@ export function TabSection(props: {
               >
                 <button
                   type="button"
+                  {...mergeLayoutFocusAttributes(
+                    {
+                      "data-layout-role": "tab",
+                      "data-layout-tab-section-id": tabSection.id,
+                      "data-layout-tab-id": tab.id,
+                    },
+                    focusBridge?.getTabAttributes?.(tabSection, tab),
+                  )}
                   className="layout-v2-tab-section__tab-main"
                   onClick={() => onFocusTab(tab.id)}
                   onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -710,6 +735,14 @@ export function TabSection(props: {
 
       <div
         ref={contentRef}
+        {...mergeLayoutFocusAttributes(
+          {
+            "data-layout-role": "tab-content",
+            "data-layout-tab-section-id": tabSection.id,
+            "data-layout-tab-id": activeCard?.id,
+          },
+          focusBridge?.getContentAttributes?.(tabSection, activeCard),
+        )}
         className={[
           "layout-v2-tab-section__content",
           pointerInsideContent ? "layout-v2-tab-section__content--drag-over" : "",

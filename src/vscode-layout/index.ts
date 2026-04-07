@@ -7,6 +7,7 @@
 export * from "../section";
 export * from "../hostMetadata";
 export * from "./store";
+export * from "./focusBridge";
 export * from "./renderAdapters";
 export * from "../activity-bar/activityBarModel";
 export * from "../activity-bar/activityBarDrag";

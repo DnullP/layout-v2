@@ -4,6 +4,9 @@ import {
     ActivityBar,
     PanelSection,
     TabSection,
+    createActivityBarRenderAdapterFromRegistry,
+    createPanelSectionRenderAdapterFromRegistry,
+    createTabSectionRenderAdapterFromRegistry,
 } from "../src";
 
 describe("render adapters", () => {
@@ -16,8 +19,8 @@ describe("render adapters", () => {
                     selectedIconId: "explorer",
                 }}
                 renderIcon={(icon) => <span data-host-icon={icon.id}>HOST-{icon.symbol}</span>}
-                onSelectIcon={() => {}}
-                onMoveIcon={() => {}}
+                onSelectIcon={() => { }}
+                onMoveIcon={() => { }}
             />,
         );
 
@@ -34,9 +37,9 @@ describe("render adapters", () => {
                 }}
                 renderPanelTab={(panel) => <span data-host-panel-tab={panel.id}>{panel.label}</span>}
                 renderPanelContent={(panel) => <div data-host-panel-content={panel.id}>{panel.content}</div>}
-                onFocusPanel={() => {}}
-                onToggleCollapsed={() => {}}
-                onMovePanel={() => {}}
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
             />,
         );
 
@@ -52,14 +55,104 @@ describe("render adapters", () => {
                 }}
                 renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
                 renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
-                onFocusTab={() => {}}
-                onCloseTab={() => {}}
-                onMoveTab={() => {}}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
             />,
         );
 
         expect(activityMarkup).toContain("HOST-E");
         expect(panelMarkup).toContain("data-host-panel-content=\"files\"");
         expect(tabMarkup).toContain("data-host-tab-title=\"welcome\"");
+    });
+});
+
+describe("render adapter registries", () => {
+    test("应支持从 registry 工厂创建 activity、panel、tab 渲染适配器", () => {
+        const activityAdapter = createActivityBarRenderAdapterFromRegistry({
+            resolveRendererId: (icon) => String(icon.meta?.componentId ?? "fallback"),
+            renderers: {
+                explorer: (icon) => <span data-registry-activity={icon.id}>A-{icon.label}</span>,
+                fallback: (icon) => <span data-registry-activity={icon.id}>F-{icon.label}</span>,
+            },
+        });
+
+        const panelAdapter = createPanelSectionRenderAdapterFromRegistry({
+            resolveRendererId: (panel) => String(panel.meta?.componentId ?? "fallback"),
+            renderers: {
+                files: {
+                    renderPanelTab: (panel) => <span data-registry-panel-tab={panel.id}>P-{panel.label}</span>,
+                    renderPanelContent: (panel) => <div data-registry-panel-content={panel.id}>PC-{panel.content}</div>,
+                },
+            },
+            fallbackRenderPanelContent: (panel) => <div data-registry-panel-fallback={panel.id}>{panel.content}</div>,
+        });
+
+        const tabAdapter = createTabSectionRenderAdapterFromRegistry({
+            resolveRendererId: (tab) => String(tab.meta?.componentId ?? tab.type ?? "fallback"),
+            renderers: {
+                editor: {
+                    renderTabTitle: (tab) => <span data-registry-tab-title={tab.id}>T-{tab.title}</span>,
+                    renderTabContent: (tab) => <div data-registry-tab-content={tab.id}>TC-{tab.content}</div>,
+                },
+            },
+            fallbackRenderTabTitle: (tab) => <span data-registry-tab-fallback={tab.id}>{tab.title}</span>,
+        });
+
+        const activityMarkup = renderToStaticMarkup(
+            <ActivityBar
+                bar={{
+                    id: "primary",
+                    icons: [{ id: "explorer", label: "Explorer", symbol: "E", meta: { componentId: "explorer" } }],
+                    selectedIconId: "explorer",
+                }}
+                renderIcon={activityAdapter.renderIcon}
+                onSelectIcon={() => { }}
+                onMoveIcon={() => { }}
+            />,
+        );
+
+        const panelMarkup = renderToStaticMarkup(
+            <PanelSection
+                leafSectionId="left"
+                committedLeafSectionId="left"
+                panelSectionId="left-panel"
+                panelSection={{
+                    id: "left-panel",
+                    panels: [{ id: "files", label: "Files", symbol: "F", content: "Files panel", meta: { componentId: "files" } }],
+                    focusedPanelId: "files",
+                    isCollapsed: false,
+                }}
+                renderPanelTab={panelAdapter.renderPanelTab}
+                renderPanelContent={panelAdapter.renderPanelContent}
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
+            />,
+        );
+
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [{ id: "welcome", title: "Welcome", content: "Welcome page", meta: { componentId: "editor" } }],
+                    focusedTabId: "welcome",
+                }}
+                renderTabTitle={tabAdapter.renderTabTitle}
+                renderTabContent={tabAdapter.renderTabContent}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(activityMarkup).toContain("data-registry-activity=\"explorer\"");
+        expect(panelMarkup).toContain("data-registry-panel-tab=\"files\"");
+        expect(panelMarkup).toContain("data-registry-panel-content=\"files\"");
+        expect(tabMarkup).toContain("data-registry-tab-title=\"welcome\"");
+        expect(tabMarkup).toContain("data-registry-tab-content=\"welcome\"");
     });
 });

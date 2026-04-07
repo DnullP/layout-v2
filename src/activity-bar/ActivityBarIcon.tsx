@@ -22,6 +22,7 @@
 import { type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { type ActivityBarIconDefinition } from "./activityBarModel";
 import "./activityBar.css";
+import { type LayoutFocusAttributes } from "../vscode-layout/focusBridge";
 
 export type ActivityBarIconRenderer = (icon: ActivityBarIconDefinition) => ReactNode;
 
@@ -70,11 +71,12 @@ export function ActivityBarIcon(props: {
   icon: ActivityBarIconDefinition;
   selected: boolean;
   dragging: boolean;
+  focusAttributes?: LayoutFocusAttributes;
   renderIcon?: ActivityBarIconRenderer;
   onSelect: () => void;
   onPointerPress: (payload: ActivityBarPointerPressPayload) => void;
 }): ReactNode {
-  const { barId, index, icon, selected, dragging, renderIcon, onSelect, onPointerPress } = props;
+  const { barId, index, icon, selected, dragging, focusAttributes, renderIcon, onSelect, onPointerPress } = props;
   const className = [
     "layout-v2-activity-bar__icon",
     selected ? "layout-v2-activity-bar__icon--selected" : "",
@@ -109,6 +111,7 @@ export function ActivityBarIcon(props: {
       className={className}
       aria-label={icon.label}
       title={icon.label}
+      {...focusAttributes}
       onClick={onSelect}
       data-icon-id={icon.id}
       onPointerDown={handlePointerDown}

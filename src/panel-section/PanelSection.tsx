@@ -19,6 +19,10 @@ import {
     type PanelSectionPanelMove,
     type PanelSectionStateItem,
 } from "./panelSectionModel";
+import {
+    mergeLayoutFocusAttributes,
+    type PanelSectionFocusBridge,
+} from "../vscode-layout/focusBridge";
 import "./panelSection.css";
 
 export type {
@@ -143,6 +147,7 @@ export function PanelSection(props: {
     panelSection: PanelSectionStateItem | null;
     dragSession?: PanelSectionDragSession | null;
     activityDragSession?: ActivityBarDragSession | null;
+    focusBridge?: PanelSectionFocusBridge<PanelSectionStateItem, PanelSectionPanelDefinition>;
     interactive?: boolean;
     allowContentPreview?: boolean;
     renderPanelTab?: PanelSectionTabRenderer;
@@ -162,6 +167,7 @@ export function PanelSection(props: {
         panelSection,
         dragSession: controlledDragSession,
         activityDragSession,
+        focusBridge,
         interactive = true,
         allowContentPreview = false,
         renderPanelTab,
@@ -534,7 +540,18 @@ export function PanelSection(props: {
     const activityPointerInsideBar = Boolean(activityDropIndex !== null);
 
     return (
-        <div ref={rootRef} className="layout-v2-panel-section" data-panel-section-id={panelSection.id}>
+        <div
+            ref={rootRef}
+            className="layout-v2-panel-section"
+            data-panel-section-id={panelSection.id}
+            {...mergeLayoutFocusAttributes(
+                {
+                    "data-layout-role": "panel-section",
+                    "data-layout-panel-section-id": panelSection.id,
+                },
+                focusBridge?.getSectionAttributes?.(panelSection),
+            )}
+        >
             <div
                 ref={barRef}
                 className={[
@@ -559,6 +576,14 @@ export function PanelSection(props: {
                             ) : (
                                 <button
                                     type="button"
+                                    {...mergeLayoutFocusAttributes(
+                                        {
+                                            "data-layout-role": "panel",
+                                            "data-layout-panel-section-id": panelSection.id,
+                                            "data-layout-panel-id": panel.id,
+                                        },
+                                        focusBridge?.getPanelAttributes?.(panelSection, panel),
+                                    )}
                                     className={[
                                         "layout-v2-panel-section__panel-tab",
                                         panelSection.focusedPanelId === panel.id ? "layout-v2-panel-section__panel-tab--focused" : "",
@@ -614,6 +639,14 @@ export function PanelSection(props: {
 
             <div
                 ref={contentRef}
+                {...mergeLayoutFocusAttributes(
+                    {
+                        "data-layout-role": "panel-content",
+                        "data-layout-panel-section-id": panelSection.id,
+                        "data-layout-panel-id": activePanel?.id,
+                    },
+                    focusBridge?.getContentAttributes?.(panelSection, activePanel),
+                )}
                 className={[
                     "layout-v2-panel-section__content",
                     panelSection.isCollapsed ? "layout-v2-panel-section__content--collapsed" : "",
