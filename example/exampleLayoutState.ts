@@ -56,7 +56,7 @@ import {
   type ActivityBarIconDefinition,
   type ActivityBarsState,
 } from "../src/activity-bar/activityBarModel";
-import { type PanelSectionDragSession, type PanelSectionSplitSide } from "../src/panel-section/panelSectionDrag";
+import { type PanelSectionDragSession, type PanelSectionHoverTarget, type PanelSectionSplitSide } from "../src/panel-section/panelSectionDrag";
 import { type TabSectionDragSession, type TabSectionSplitSide } from "../src/tab-section/tabSectionDrag";
 import {
   closeTabSectionTab,
@@ -1304,4 +1304,135 @@ export function buildPanelToActivityPreviewState(
     createActivityIconFromPanel(panel),
     targetIndex,
   );
+}
+
+/**
+ * @function buildActivityToContentPreviewState
+ * @description 基于 activity icon 拖拽到 panel content 区域的目标，构建 split 预览布局。
+ * @param root committed 布局树。
+ * @param state committed panel section 状态。
+ * @param contentTarget 当前 hover target。
+ * @param icon 被拖拽的 activity icon。
+ * @returns 预览布局；不需要预览时返回 null。
+ */
+export function buildActivityToContentPreviewState(
+  root: SectionNode<ExampleSectionLayoutData>,
+  state: PanelSectionsState,
+  contentTarget: PanelSectionHoverTarget | null,
+  icon: ActivityBarIconDefinition | null,
+): {
+  root: SectionNode<ExampleSectionLayoutData>;
+  state: PanelSectionsState;
+} | null {
+  if (!contentTarget || contentTarget.area !== "content" || !contentTarget.splitSide || !contentTarget.anchorLeafSectionId || !icon) {
+    return null;
+  }
+
+  const targetLeaf = findSectionNode(root, contentTarget.anchorLeafSectionId);
+  if (!targetLeaf || targetLeaf.data.component.type !== "panel-section") {
+    return null;
+  }
+
+  const previewIds = createPreviewIdentifiers(contentTarget.anchorLeafSectionId);
+  const splitPlan = resolvePanelSplitPlan(contentTarget.splitSide);
+  const originalDraft = buildSectionDraftFromLeaf(targetLeaf, previewIds.originalChildSectionId);
+  const newDraft = createExampleSectionDraft(
+    previewIds.newChildSectionId,
+    icon.label,
+    "panel",
+    createSectionComponentBinding("panel-section", {
+      panelSectionId: previewIds.tabSectionId,
+    }),
+  );
+
+  const previewRoot = splitSectionTree(
+    root,
+    targetLeaf.id,
+    splitPlan.direction,
+    splitPlan.originalAt === "first"
+      ? { ratio: splitPlan.ratio, first: originalDraft, second: newDraft }
+      : { ratio: splitPlan.ratio, first: newDraft, second: originalDraft },
+  );
+
+  const previewState = upsertPanelSection(
+    state,
+    createEmptyPanelSectionStateItem(previewIds.tabSectionId),
+  );
+
+  return { root: previewRoot, state: previewState };
+}
+
+/**
+ * @function commitActivityToContentDrop
+ * @description 提交 activity icon → content area split。
+ * @param root committed 布局树。
+ * @param state committed panel section 状态。
+ * @param contentTarget hover target。
+ * @param icon 被拖拽的 icon。
+ * @returns 提交后的布局和新 panel section id；无需提交时返回 null。
+ */
+export function commitActivityToContentDrop(
+  root: SectionNode<ExampleSectionLayoutData>,
+  state: PanelSectionsState,
+  contentTarget: PanelSectionHoverTarget | null,
+  icon: ActivityBarIconDefinition | null,
+): {
+  root: SectionNode<ExampleSectionLayoutData>;
+  state: PanelSectionsState;
+  newPanelSectionId: string;
+} | null {
+  if (!contentTarget || contentTarget.area !== "content" || !contentTarget.splitSide || !contentTarget.anchorLeafSectionId || !icon) {
+    return null;
+  }
+
+  const targetLeaf = findSectionNode(root, contentTarget.anchorLeafSectionId);
+  if (!targetLeaf || targetLeaf.data.component.type !== "panel-section") {
+    return null;
+  }
+
+  const usedSectionIds = collectAllSectionIds(root);
+  const usedPanelSectionIds = new Set(Object.keys(state.sections));
+  const committedIds = {
+    panelSectionId: createUniqueIdentifier(`${contentTarget.anchorLeafSectionId}-panels`, usedPanelSectionIds),
+    originalChildSectionId: createUniqueIdentifier(`${contentTarget.anchorLeafSectionId}-section`, usedSectionIds),
+    newChildSectionId: createUniqueIdentifier(`${contentTarget.anchorLeafSectionId}-split`, usedSectionIds),
+  };
+  const splitPlan = resolvePanelSplitPlan(contentTarget.splitSide);
+  const originalDraft = buildSectionDraftFromLeaf(targetLeaf, committedIds.originalChildSectionId);
+  const newDraft = createExampleSectionDraft(
+    committedIds.newChildSectionId,
+    icon.label,
+    "panel",
+    createSectionComponentBinding("panel-section", {
+      panelSectionId: committedIds.panelSectionId,
+    }),
+  );
+
+  const committedRoot = splitSectionTree(
+    root,
+    targetLeaf.id,
+    splitPlan.direction,
+    splitPlan.originalAt === "first"
+      ? { ratio: splitPlan.ratio, first: originalDraft, second: newDraft }
+      : { ratio: splitPlan.ratio, first: newDraft, second: originalDraft },
+  );
+
+  let committedState = upsertPanelSection(
+    state,
+    createEmptyPanelSectionStateItem(committedIds.panelSectionId),
+  );
+
+  // Insert the activity icon as a panel in the new section
+  committedState = insertPanelSectionPanel(
+    committedState,
+    committedIds.panelSectionId,
+    createPanelFromActivityIcon(icon),
+    0,
+  );
+
+  return {
+    root: committedRoot,
+    state: committedState,
+    newPanelSectionId: committedIds.panelSectionId,
+  };
 }

@@ -1,0 +1,842 @@
+/**
+ * @module host/layout-v2/vscode-layout/VSCodeWorkbench
+ * @description 高层 VSCode 风格 Workbench 组件。
+ *   将 section tree 构建、store 管理、component registry 编排、DnD 逻辑全部内化，
+ *   消费方只需提供声明式的 activity / panel / tab 定义和渲染回调。
+ */
+
+import {
+    useCallback,
+    useEffect,
+    useImperativeHandle,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+    type Ref,
+} from "react";
+import { setSectionHidden, type SectionNode } from "../section/layoutModel";
+import { createSectionComponentBinding, createSectionComponentRegistry, SectionComponentHost } from "../section/sectionComponent";
+import { SectionLayoutView } from "../section/SectionLayoutView";
+import { ActivityBar } from "../activity-bar/ActivityBar";
+import { ActivityBarDragPreview } from "../activity-bar/ActivityBarDragPreview";
+import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
+import { type ActivityBarIconMove } from "../activity-bar/activityBarModel";
+import { PanelSection } from "../panel-section/PanelSection";
+import { PanelSectionDragPreview } from "../panel-section/PanelSectionDragPreview";
+import { type PanelSectionDragSession } from "../panel-section/panelSectionDrag";
+import { TabSection, TabDragSessionContext } from "../tab-section/TabSection";
+import { type TabSectionDragSession } from "../tab-section/tabSectionDrag";
+import { type TabSectionTabDefinition, type TabSectionsState } from "../tab-section/tabSectionModel";
+import { createVSCodeLayoutStore, useVSCodeLayoutStoreState, type VSCodeLayoutState, type VSCodeLayoutStore } from "./store";
+import {
+    buildTabWorkbenchPreviewState,
+    commitTabWorkbenchDrop,
+    cleanupEmptyTabWorkbenchSections,
+    type TabWorkbenchAdapter,
+} from "./tabWorkbench";
+import {
+    buildPanelWorkbenchPreviewState,
+    buildActivityBarContentPreviewState,
+    commitPanelWorkbenchDrop,
+    commitActivityBarContentDrop,
+    isPanelWorkbenchPreviewLeaf,
+    resolvePanelWorkbenchCommittedLeafSectionId,
+    type PanelWorkbenchAdapter,
+} from "./panelWorkbench";
+import {
+    type WorkbenchSectionData,
+    type WorkbenchTabPayload,
+    buildWorkbenchActivityBars,
+    buildWorkbenchPanelSections,
+    createWorkbenchLayoutState,
+    createWorkbenchRootLayout,
+    readWorkbenchTabPayload,
+    WORKBENCH_MAIN_TAB_SECTION_ID,
+    WORKBENCH_LEFT_ACTIVITY_BAR_ID,
+    WORKBENCH_RIGHT_PANEL_SECTION_ID,
+} from "./workbenchPreset";
+import type { ActivityBarFocusBridge } from "./focusBridge";
+import type { PanelSectionFocusBridge } from "./focusBridge";
+import type { ActivityBarStateItem } from "../activity-bar/activityBarModel";
+import type { PanelSectionStateItem, PanelSectionPanelDefinition } from "../panel-section/panelSectionModel";
+import type {
+    WorkbenchActivityDefinition,
+    WorkbenchApi,
+    WorkbenchPanelContext,
+    WorkbenchPanelDefinition,
+    WorkbenchSidebarState,
+    WorkbenchTabApi,
+    WorkbenchTabDefinition,
+} from "./workbenchTypes";
+
+export interface VSCodeWorkbenchProps {
+    /** 声明式 activity 定义列表。 */
+    activities?: WorkbenchActivityDefinition[];
+    /** 声明式 panel 定义列表。 */
+    panels?: WorkbenchPanelDefinition[];
+    /** tab component 渲染器表（key 是 component ID）。 */
+    tabComponents?: Record<string, (props: { params: Record<string, unknown>; api: WorkbenchTabApi }) => ReactNode>;
+    /** 初始打开的 tab 列表。 */
+    initialTabs?: WorkbenchTabDefinition[];
+    /** 是否启用右侧边栏。 */
+    hasRightSidebar?: boolean;
+    /** 初始侧边栏状态（用于恢复持久化）。 */
+    initialSidebarState?: WorkbenchSidebarState;
+    /** 初始 section 分割比例（sectionId → ratio）。 */
+    initialSectionRatios?: Record<string, number>;
+
+    /** 渲染 activity bar icon。 */
+    renderActivityIcon?: (activity: WorkbenchActivityDefinition) => ReactNode;
+    /** 渲染 panel 内容。 */
+    renderPanelContent?: (panelId: string, context: WorkbenchPanelContext) => ReactNode;
+    /** 渲染 tab 标题（默认使用 tab.title）。 */
+    renderTabTitle?: (tab: TabSectionTabDefinition) => ReactNode;
+
+    /** activity icon 被激活时的回调（activationMode="action" 时触发）。 */
+    onActivateActivity?: (activityId: string, context: WorkbenchPanelContext) => void;
+    /** activity icon 被选中时的回调（activationMode="focus" 时触发）。 */
+    onSelectActivity?: (activityId: string, bar: "left" | "right") => void;
+    /** 侧边栏状态变化回调（用于持久化）。 */
+    onSidebarStateChange?: (state: WorkbenchSidebarState) => void;
+    /** 活跃 tab 变化回调。 */
+    onActiveTabChange?: (tabId: string | null) => void;
+    /** activity icon 右键菜单回调。 */
+    onActivityIconContextMenu?: (iconId: string, event: { clientX: number; clientY: number }) => void;
+    /** activity icon 拖拽到面板内容区触发分裂后的回调。 */
+    onActivityIconDrop?: (iconId: string, newPanelSectionId: string) => void;
+    /** activity bar 空白区域右键菜单回调。 */
+    onActivityBarBackgroundContextMenu?: (event: { clientX: number; clientY: number }) => void;
+    /** section 分割比例变化回调（用于持久化）。 */
+    onSectionRatioChange?: (ratios: Record<string, number>) => void;
+
+    /** 命令式 API ref。 */
+    apiRef?: Ref<WorkbenchApi | null>;
+    /** 根容器 className。 */
+    className?: string;
+}
+
+function findTabSectionIdByTabId(sections: TabSectionsState, tabId: string): string | null {
+    for (const section of Object.values(sections.sections)) {
+        if (section.tabs.some((tab) => tab.id === tabId)) {
+            return section.id;
+        }
+    }
+    return null;
+}
+
+function resolveActiveTabSectionId(state: VSCodeLayoutState<WorkbenchSectionData>): string | null {
+    const preferred = state.workbench?.activeGroupId ?? null;
+
+    if (preferred && state.tabSections.sections[preferred]) {
+        return preferred;
+    }
+    return Object.keys(state.tabSections.sections)[0] ?? null;
+}
+
+function collectSectionRatios<T>(node: SectionNode<T>): Record<string, number> {
+    const ratios: Record<string, number> = {};
+    function walk(section: SectionNode<T>): void {
+        if (section.split) {
+            ratios[section.id] = section.split.ratio;
+            walk(section.split.children[0]);
+            walk(section.split.children[1]);
+        }
+    }
+    walk(node);
+    return ratios;
+}
+
+const workbenchTabAdapter: TabWorkbenchAdapter<WorkbenchSectionData> = {
+    createTabSectionDraft: (args) => ({
+        id: args.nextSectionId,
+        title: args.title,
+        data: {
+            role: args.sourceLeaf.data.role,
+            component: createSectionComponentBinding("tab-section", {
+                tabSectionId: args.nextTabSectionId,
+            }),
+        },
+        resizableEdges: args.sourceLeaf.resizableEdges,
+    }),
+    getTabSectionId: (section) => {
+        if (section.data.component.type !== "tab-section") {
+            return null;
+        }
+        return (section.data.component.props as { tabSectionId?: string }).tabSectionId ?? null;
+    },
+};
+
+const workbenchPanelAdapter: PanelWorkbenchAdapter<WorkbenchSectionData> = {
+    createPanelSectionDraft: (args) => ({
+        id: args.nextSectionId,
+        title: args.title,
+        data: {
+            role: args.sourceLeaf.data.role,
+            component: createSectionComponentBinding("panel-section", {
+                panelSectionId: args.nextPanelSectionId,
+            }),
+        },
+        resizableEdges: args.sourceLeaf.resizableEdges,
+    }),
+    getPanelSectionId: (section) => {
+        if (section.data.component.type !== "panel-section") {
+            return null;
+        }
+        return (section.data.component.props as { panelSectionId?: string }).panelSectionId ?? null;
+    },
+};
+
+export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
+    const {
+        activities = [],
+        panels = [],
+        tabComponents = {},
+        initialTabs,
+        hasRightSidebar = false,
+        initialSidebarState,
+        initialSectionRatios,
+        renderActivityIcon,
+        renderPanelContent,
+        renderTabTitle,
+        onActivateActivity,
+        onSelectActivity,
+        onSidebarStateChange,
+        onActiveTabChange,
+        onActivityIconContextMenu,
+        onActivityIconDrop,
+        onActivityBarBackgroundContextMenu,
+        onSectionRatioChange,
+        apiRef,
+        className,
+    } = props;
+
+    // --- Sidebar state ---
+    const [leftSidebarVisible, setLeftSidebarVisible] = useState(initialSidebarState?.left.visible ?? true);
+    const [rightSidebarVisible, setRightSidebarVisible] = useState(initialSidebarState?.right.visible ?? true);
+    const [activeLeftActivityId, setActiveLeftActivityId] = useState<string | null>(initialSidebarState?.left.activeActivityId ?? null);
+    // Right sidebar has no dedicated activity bar; the value is kept for state
+    // reporting only and never mutated after mount.
+    const [activeRightActivityId] = useState<string | null>(initialSidebarState?.right.activeActivityId ?? null);
+    const [activeLeftPanelId, setActiveLeftPanelId] = useState<string | null>(initialSidebarState?.left.activePanelId ?? null);
+    const [activeRightPanelId, setActiveRightPanelId] = useState<string | null>(initialSidebarState?.right.activePanelId ?? null);
+
+    // --- DnD sessions ---
+    const [activityBarDragSession, setActivityBarDragSession] = useState<ActivityBarDragSession | null>(null);
+    const [panelDragSession, setPanelDragSession] = useState<PanelSectionDragSession | null>(null);
+    const [tabDragSession, setTabDragSession] = useState<TabSectionDragSession | null>(null);
+
+    // --- Derived data ---
+    const activitiesById = useMemo(
+        () => new Map(activities.map((a) => [a.id, a])),
+        [activities],
+    );
+
+    // --- Store ---
+    const storeRef = useRef<VSCodeLayoutStore<WorkbenchSectionData> | null>(null);
+    if (!storeRef.current) {
+        storeRef.current = createVSCodeLayoutStore({
+            initialState: createWorkbenchLayoutState({
+                activities,
+                panels,
+                initialTabs,
+                hasRightSidebar,
+                initialSidebarState: initialSidebarState ? {
+                    left: { activeActivityId: initialSidebarState.left.activeActivityId, activePanelId: initialSidebarState.left.activePanelId },
+                    right: { activeActivityId: initialSidebarState.right.activeActivityId, activePanelId: initialSidebarState.right.activePanelId },
+                } : undefined,
+            }),
+        });
+        // Apply persisted section ratios (fire-and-forget, must run before first render)
+        if (initialSectionRatios) {
+            for (const [sectionId, ratio] of Object.entries(initialSectionRatios)) {
+                storeRef.current.resizeSection(sectionId, ratio);
+            }
+        }
+    }
+    const store = storeRef.current;
+    const state = useVSCodeLayoutStoreState(store);
+
+    // --- Late-arriving section ratio restoration ---
+    // backendConfig loads async, so initialSectionRatios may be undefined on
+    // the first render that creates the store. Apply them once they arrive.
+    const initialRatiosAppliedRef = useRef(!!initialSectionRatios);
+    useEffect(() => {
+        if (!initialRatiosAppliedRef.current && initialSectionRatios) {
+            initialRatiosAppliedRef.current = true;
+            for (const [sectionId, ratio] of Object.entries(initialSectionRatios)) {
+                store.resizeSection(sectionId, ratio);
+            }
+        }
+    }, [initialSectionRatios, store]);
+
+    // --- Section ratio change notification ---
+    const onSectionRatioChangeRef = useRef(onSectionRatioChange);
+    onSectionRatioChangeRef.current = onSectionRatioChange;
+    useEffect(() => {
+        return store.addLifecycleHook((event) => {
+            if (event.command === "resize-section" && event.phase === "after" && event.changed) {
+                onSectionRatioChangeRef.current?.(collectSectionRatios(event.nextState.root));
+            }
+        });
+    }, [store]);
+
+    // --- Tab operations ---
+    const openTab = useCallback((tab: WorkbenchTabDefinition): void => {
+        store.updateState((currentState) => {
+            const nextTab: TabSectionTabDefinition = {
+                id: tab.id,
+                title: tab.title,
+                type: "workbench-tab",
+                payload: { component: tab.component, params: tab.params ?? {} } satisfies WorkbenchTabPayload,
+                content: `Component: ${tab.component}`,
+                tone: "neutral",
+            };
+
+            // Check all sections — if the tab already exists somewhere, focus it there.
+            const existingSectionId = findTabSectionIdByTabId(currentState.tabSections, tab.id);
+            if (existingSectionId) {
+                const section = currentState.tabSections.sections[existingSectionId];
+                // Update the tab definition in-place (title / params may have changed).
+                const nextTabs = section.tabs.map((t) => (t.id === tab.id ? nextTab : t));
+                return {
+                    ...currentState,
+                    tabSections: {
+                        sections: {
+                            ...currentState.tabSections.sections,
+                            [existingSectionId]: { ...section, tabs: nextTabs, focusedTabId: tab.id },
+                        },
+                    },
+                    workbench: { activeGroupId: existingSectionId },
+                };
+            }
+
+            const targetSectionId = resolveActiveTabSectionId(currentState) ?? WORKBENCH_MAIN_TAB_SECTION_ID;
+            const currentSection = currentState.tabSections.sections[targetSectionId] ?? {
+                id: targetSectionId,
+                tabs: [] as TabSectionTabDefinition[],
+                focusedTabId: null,
+                isRoot: targetSectionId === WORKBENCH_MAIN_TAB_SECTION_ID,
+            };
+
+            return {
+                ...currentState,
+                tabSections: {
+                    sections: {
+                        ...currentState.tabSections.sections,
+                        [targetSectionId]: { ...currentSection, tabs: [...currentSection.tabs, nextTab], focusedTabId: nextTab.id },
+                    },
+                },
+                workbench: { activeGroupId: targetSectionId },
+            };
+        });
+    }, [store]);
+
+    const closeTab = useCallback((tabId: string): void => {
+        store.updateState((currentState) => {
+            const sourceSectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
+            if (!sourceSectionId) return currentState;
+            const section = currentState.tabSections.sections[sourceSectionId];
+            if (!section) return currentState;
+
+            const nextTabs = section.tabs.filter((t) => t.id !== tabId);
+            if (nextTabs.length === section.tabs.length) return currentState;
+
+            const nextFocusedTabId = section.focusedTabId === tabId
+                ? (nextTabs[nextTabs.length - 1]?.id ?? null)
+                : section.focusedTabId;
+
+            const cleaned = cleanupEmptyTabWorkbenchSections(currentState.root, {
+                sections: {
+                    ...currentState.tabSections.sections,
+                    [sourceSectionId]: { ...section, tabs: nextTabs, focusedTabId: nextFocusedTabId },
+                },
+            }, workbenchTabAdapter);
+
+            return {
+                ...currentState,
+                root: cleaned.root,
+                tabSections: cleaned.state,
+                workbench: {
+                    activeGroupId: cleaned.state.sections[sourceSectionId]
+                        ? sourceSectionId
+                        : (Object.keys(cleaned.state.sections)[0] ?? null),
+                },
+            };
+        });
+    }, [store]);
+
+    const setActiveTab = useCallback((tabId: string): void => {
+        store.updateState((currentState) => {
+            const targetSectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
+            if (!targetSectionId) return currentState;
+            const section = currentState.tabSections.sections[targetSectionId];
+            if (!section) return currentState;
+
+            return {
+                ...currentState,
+                tabSections: {
+                    sections: {
+                        ...currentState.tabSections.sections,
+                        [targetSectionId]: { ...section, focusedTabId: tabId },
+                    },
+                },
+                workbench: { activeGroupId: targetSectionId },
+            };
+        });
+    }, [store]);
+
+    const activatePanelById = useCallback((panelId: string): void => {
+        const panelDef = panels.find((p) => p.id === panelId);
+        if (!panelDef) return;
+
+        if (panelDef.position === "right") {
+            setRightSidebarVisible(true);
+            // Don't set activeRightActivityId — the right sidebar shows all
+            // right-side panels as icons in a single rail (no separate activity bar).
+            setActiveRightPanelId(panelId);
+        } else {
+            setLeftSidebarVisible(true);
+            setActiveLeftActivityId(panelDef.activityId);
+            setActiveLeftPanelId(panelId);
+        }
+    }, [panels]);
+
+    // --- Sync activity bars to store ---
+    useEffect(() => {
+        const nextBars = buildWorkbenchActivityBars(activities, activeLeftActivityId, activeRightActivityId);
+        store.resetActivityBars(nextBars);
+    }, [activities, activeLeftActivityId, activeRightActivityId, store]);
+
+    // --- Sync panel sections to store ---
+    useEffect(() => {
+        const panelSections = buildWorkbenchPanelSections(
+            panels, activities,
+            activeLeftActivityId, activeRightActivityId,
+            activeLeftPanelId, activeRightPanelId,
+        );
+        for (const section of panelSections) {
+            store.upsertPanelSection(section);
+        }
+    }, [activities, panels, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId, store]);
+
+    // --- Sync sidebar visibility ---
+    useEffect(() => {
+        store.updateState((currentState) => ({
+            ...currentState,
+            root: setSectionHidden(currentState.root, "left-sidebar", !leftSidebarVisible),
+        }));
+    }, [leftSidebarVisible, store]);
+
+    useEffect(() => {
+        if (!hasRightSidebar) return;
+        store.updateState((currentState) => ({
+            ...currentState,
+            root: setSectionHidden(currentState.root, "right-sidebar", !rightSidebarVisible),
+        }));
+    }, [hasRightSidebar, rightSidebarVisible, store]);
+
+    // --- Sync root layout when sidebar config changes ---
+    useEffect(() => {
+        store.resetLayout(createWorkbenchRootLayout(hasRightSidebar));
+    }, [hasRightSidebar, store]);
+
+    // --- Notify sidebar state changes ---
+    useEffect(() => {
+        onSidebarStateChange?.({
+            left: { visible: leftSidebarVisible, activeActivityId: activeLeftActivityId, activePanelId: activeLeftPanelId },
+            right: { visible: rightSidebarVisible, activeActivityId: activeRightActivityId, activePanelId: activeRightPanelId },
+        });
+    }, [leftSidebarVisible, rightSidebarVisible, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId, onSidebarStateChange]);
+
+    // --- Notify active tab changes ---
+    const activeTabSectionId = resolveActiveTabSectionId(state);
+    const activeTabSection = activeTabSectionId ? state.tabSections.sections[activeTabSectionId] ?? null : null;
+    const activeTabId = activeTabSection?.focusedTabId ?? null;
+    const prevActiveTabIdRef = useRef(activeTabId);
+    useEffect(() => {
+        if (prevActiveTabIdRef.current !== activeTabId) {
+            prevActiveTabIdRef.current = activeTabId;
+            onActiveTabChange?.(activeTabId);
+        }
+    }, [activeTabId, onActiveTabChange]);
+
+    // --- Build panel context ---
+    const buildPanelContext = useCallback((hostPanelId: string | null): WorkbenchPanelContext => ({
+        activeTabId,
+        hostPanelId,
+        openTab,
+        closeTab,
+        setActiveTab,
+        activatePanel: activatePanelById,
+    }), [activeTabId, openTab, closeTab, setActiveTab, activatePanelById]);
+
+    // --- Tab DnD preview ---
+    const tabPreview = useMemo(
+        () => buildTabWorkbenchPreviewState(state.root, state.tabSections, tabDragSession, workbenchTabAdapter),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
+        [state.root, state.tabSections, tabDragSession?.phase, tabDragSession?.hoverTarget],
+    );
+    const tabPreviewedRoot = tabPreview?.root ?? state.root;
+    const renderedTabSections = tabPreview?.state ?? state.tabSections;
+
+    // --- Panel DnD preview ---
+    const panelPreview = useMemo(
+        () => buildPanelWorkbenchPreviewState(tabPreviewedRoot, state.panelSections, panelDragSession, workbenchPanelAdapter),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
+        [tabPreviewedRoot, state.panelSections, panelDragSession?.phase, panelDragSession?.hoverTarget],
+    );
+    const panelPreviewedRoot = panelPreview?.root ?? tabPreviewedRoot;
+    const panelPreviewedSections = panelPreview?.state ?? state.panelSections;
+
+    // --- Activity bar icon → content area DnD preview ---
+    const activityContentTarget = activityBarDragSession?.phase === "dragging" ? activityBarDragSession.contentTarget : null;
+    const activityPreviewTitle = activityContentTarget
+        ? (state.activityBars.bars[WORKBENCH_LEFT_ACTIVITY_BAR_ID]?.icons.find((icon) => icon.id === activityBarDragSession?.iconId)?.label ?? "")
+        : "";
+    const activityPreview = useMemo(
+        () => buildActivityBarContentPreviewState(panelPreviewedRoot, panelPreviewedSections, activityContentTarget, workbenchPanelAdapter, activityPreviewTitle),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when contentTarget changes
+        [panelPreviewedRoot, panelPreviewedSections, activityContentTarget, activityPreviewTitle],
+    );
+    const renderedRoot = activityPreview?.root ?? panelPreviewedRoot;
+    const renderedPanelSections = activityPreview?.state ?? panelPreviewedSections;
+
+    // --- Imperative API ---
+    useImperativeHandle(apiRef, () => ({
+        openTab,
+        closeTab,
+        setActiveTab,
+        activatePanel: activatePanelById,
+        getTab: (tabId) => {
+            for (const section of Object.values(store.getState().tabSections.sections)) {
+                const tab = section.tabs.find((t) => t.id === tabId);
+                if (tab) {
+                    return { id: tab.id, params: readWorkbenchTabPayload(tab).params };
+                }
+            }
+            return null;
+        },
+        getTabs: () => {
+            const result: Array<{ id: string; params: Record<string, unknown> }> = [];
+            for (const section of Object.values(store.getState().tabSections.sections)) {
+                for (const tab of section.tabs) {
+                    result.push({ id: tab.id, params: readWorkbenchTabPayload(tab).params });
+                }
+            }
+            return result;
+        },
+        setLeftSidebarVisible,
+        setRightSidebarVisible,
+    }), [openTab, closeTab, setActiveTab, activatePanelById, store]);
+
+    // --- Component registry ---
+    const leftActivityBarState = state.activityBars.bars[WORKBENCH_LEFT_ACTIVITY_BAR_ID] ?? null;
+
+    const leftActivityFocusBridge = useMemo((): ActivityBarFocusBridge<ActivityBarStateItem, ActivityBarStateItem["icons"][number]> => ({
+        getIconAttributes: (_bar, icon) => ({
+            "data-testid": `activity-bar-item-${icon.id}`,
+        }),
+    }), []);
+
+    const leftPanelFocusBridge = useMemo((): PanelSectionFocusBridge<PanelSectionStateItem, PanelSectionPanelDefinition> => ({
+        getSectionAttributes: () => ({
+            "data-testid": "sidebar-left",
+            "aria-label": "Left Extension Panel",
+        }),
+        getEmptyAttributes: () => ({
+            "data-testid": "left-sidebar-empty",
+        }),
+        getHeaderAttributes: () => ({
+            "data-testid": "left-sidebar-header",
+        }),
+    }), []);
+
+    const rightPanelFocusBridge = useMemo((): PanelSectionFocusBridge<PanelSectionStateItem, PanelSectionPanelDefinition> => ({
+        getSectionAttributes: () => ({
+            "data-testid": "sidebar-right",
+            "aria-label": "Right Extension Panel",
+        }),
+        getPanelAttributes: (_section, panel) => ({
+            "data-testid": `right-activity-icon-${(panel.meta as Record<string, unknown> | undefined)?.activityId ?? panel.id}`,
+        }),
+        getEmptyAttributes: () => ({
+            "data-testid": "right-sidebar-empty",
+        }),
+        getHeaderAttributes: () => ({
+            "data-testid": "right-sidebar-header",
+        }),
+    }), []);
+
+    const registry = useMemo(() => createSectionComponentRegistry<WorkbenchSectionData>({
+        empty: ({ binding }) => {
+            const p = binding.props as { label: string; description: string };
+            return (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", opacity: 0.5, fontSize: 12 }}>
+                    <span>{p.label}</span>
+                </div>
+            );
+        },
+        "activity-rail": () => {
+            if (!leftActivityBarState || leftActivityBarState.icons.length === 0) {
+                return null;
+            }
+
+            return (
+                <ActivityBar
+                    bar={leftActivityBarState}
+                    dragSession={activityBarDragSession}
+                    panelDragSession={panelDragSession}
+                    focusBridge={leftActivityFocusBridge}
+                    renderIcon={(icon) => {
+                        const activity = activitiesById.get(icon.id);
+                        if (renderActivityIcon && activity) {
+                            return renderActivityIcon(activity);
+                        }
+                        return (icon.meta?.icon as ReactNode | undefined) ?? (
+                            <span style={{ fontSize: 14, fontWeight: 600 }}>{icon.symbol}</span>
+                        );
+                    }}
+                    onDragSessionChange={setActivityBarDragSession}
+                    onDragSessionEnd={(session) => {
+                        setActivityBarDragSession(null);
+
+                        if (session.contentTarget?.splitSide) {
+                            const committed = commitActivityBarContentDrop(
+                                store.getState().root,
+                                store.getState().panelSections,
+                                session.contentTarget,
+                                workbenchPanelAdapter,
+                            );
+                            if (!committed) return;
+
+                            store.replaceState({
+                                ...store.getState(),
+                                root: committed.root,
+                                panelSections: committed.state,
+                            });
+                            onActivityIconDrop?.(session.iconId, committed.newPanelSectionId);
+                        }
+                    }}
+                    onPanelDragSessionChange={setPanelDragSession}
+                    onActivateIcon={(iconId) => {
+                        const activity = activitiesById.get(iconId);
+                        if (activity?.activationMode === "action") {
+                            onActivateActivity?.(iconId, buildPanelContext(null));
+                        }
+                    }}
+                    onSelectIcon={(iconId) => {
+                        const activity = activitiesById.get(iconId);
+                        if (activity?.activationMode === "action") return;
+
+                        setLeftSidebarVisible(true);
+                        setActiveLeftActivityId(iconId);
+                        onSelectActivity?.(iconId, "left");
+                    }}
+                    onMoveIcon={(move: ActivityBarIconMove) => store.moveActivityIcon(move)}
+                    onIconContextMenu={onActivityIconContextMenu}
+                    onBackgroundContextMenu={onActivityBarBackgroundContextMenu}
+                />
+            );
+        },
+        "panel-section": ({ section, binding }) => {
+            const panelSectionProps = binding.props as { panelSectionId: string };
+            const panelSection = renderedPanelSections.sections[panelSectionProps.panelSectionId] ?? null;
+            const isRight = panelSectionProps.panelSectionId === WORKBENCH_RIGHT_PANEL_SECTION_ID;
+            const isDragging = Boolean(panelDragSession || activityBarDragSession);
+            const isPreviewLeaf = isPanelWorkbenchPreviewLeaf(section.id, isDragging);
+            const committedLeafId = resolvePanelWorkbenchCommittedLeafSectionId(
+                section.id,
+                panelDragSession?.hoverTarget?.anchorLeafSectionId
+                    ?? activityBarDragSession?.contentTarget?.anchorLeafSectionId,
+            );
+
+            return (
+                <PanelSection
+                    leafSectionId={section.id}
+                    committedLeafSectionId={committedLeafId}
+                    interactive={!isPreviewLeaf}
+                    allowContentPreview={isPreviewLeaf}
+                    panelSectionId={panelSectionProps.panelSectionId}
+                    panelSection={panelSection}
+                    dragSession={panelDragSession}
+                    activityDragSession={activityBarDragSession}
+                    focusBridge={isRight ? rightPanelFocusBridge : leftPanelFocusBridge}
+                    renderPanelTab={(panel) => (
+                        (panel.meta?.icon as ReactNode | undefined) ?? (
+                            <span style={{ fontSize: 12, fontWeight: 600 }}>{panel.symbol}</span>
+                        )
+                    )}
+                    renderPanelContent={(panel) => {
+                        if (renderPanelContent) {
+                            return renderPanelContent(panel.id, buildPanelContext(panel.id));
+                        }
+                        return <div style={{ padding: 12 }}>{panel.label}</div>;
+                    }}
+                    onDragSessionChange={setPanelDragSession}
+                    onDragSessionEnd={(session) => {
+                        setPanelDragSession(null);
+                        const committed = commitPanelWorkbenchDrop(
+                            store.getState().root,
+                            store.getState().panelSections,
+                            session,
+                            workbenchPanelAdapter,
+                        );
+                        if (!committed) return;
+
+                        store.replaceState({
+                            ...store.getState(),
+                            root: committed.root,
+                            panelSections: committed.state,
+                        });
+                    }}
+                    onActivityDragSessionChange={setActivityBarDragSession}
+                    onActivatePanel={(panelId) => activatePanelById(panelId)}
+                    onFocusPanel={(panelId) => {
+                        store.focusPanel(panelSectionProps.panelSectionId, panelId);
+                        if (isRight) {
+                            setRightSidebarVisible(true);
+                            setActiveRightPanelId(panelId);
+                        } else {
+                            setLeftSidebarVisible(true);
+                            setActiveLeftPanelId(panelId);
+                        }
+                    }}
+                    onToggleCollapsed={() => {
+                        const current = store.getPanelSection(panelSectionProps.panelSectionId);
+                        store.setPanelCollapsed(panelSectionProps.panelSectionId, !(current?.isCollapsed ?? false));
+                    }}
+                    onMovePanel={(move) => store.movePanel(move)}
+                />
+            );
+        },
+        "tab-section": ({ section, binding }) => {
+            const tsProps = binding.props as { tabSectionId: string };
+            const tabSection = renderedTabSections.sections[tsProps.tabSectionId] ?? null;
+
+            if (!tabSection || tabSection.tabs.length === 0) {
+                return (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", opacity: 0.5, fontSize: 12 }}>
+                        No open tabs
+                    </div>
+                );
+            }
+
+            return (
+                <TabSection
+                    leafSectionId={section.id}
+                    tabSectionId={tsProps.tabSectionId}
+                    tabSection={tabSection}
+                    renderTabTitle={(tab) => {
+                        if (renderTabTitle) return renderTabTitle(tab);
+                        return <span>{tab.title}</span>;
+                    }}
+                    renderTabContent={(tab) => {
+                        const payload = readWorkbenchTabPayload(tab);
+                        const Component = tabComponents[payload.component];
+
+                        if (!Component) {
+                            return (
+                                <div style={{ padding: 16 }}>
+                                    <strong>Unregistered: {payload.component}</strong>
+                                    <pre style={{ fontSize: 11, opacity: 0.6 }}>{JSON.stringify(payload.params, null, 2)}</pre>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <Component
+                                params={payload.params}
+                                api={{
+                                    id: tab.id,
+                                    close: () => closeTab(tab.id),
+                                    setActive: () => setActiveTab(tab.id),
+                                }}
+                            />
+                        );
+                    }}
+                    onDragSessionChange={setTabDragSession}
+                    onDragSessionEnd={(session) => {
+                        setTabDragSession(null);
+                        const committed = commitTabWorkbenchDrop(
+                            store.getState().root,
+                            store.getState().tabSections,
+                            session,
+                            workbenchTabAdapter,
+                        );
+                        if (!committed) return;
+
+                        store.replaceState({
+                            ...store.getState(),
+                            root: committed.root,
+                            tabSections: committed.state,
+                            workbench: { activeGroupId: committed.activeTabSectionId },
+                        });
+                    }}
+                    onFocusTab={setActiveTab}
+                    onCloseTab={closeTab}
+                    onMoveTab={(move) => store.moveTab(move)}
+                />
+            );
+        },
+    }), [
+        leftActivityBarState,
+        activityBarDragSession,
+        panelDragSession,
+        activitiesById,
+        renderActivityIcon,
+        renderPanelContent,
+        renderTabTitle,
+        tabComponents,
+        renderedPanelSections,
+        renderedTabSections,
+        buildPanelContext,
+        onActivateActivity,
+        onSelectActivity,
+        activatePanelById,
+        openTab,
+        closeTab,
+        setActiveTab,
+        store,
+        leftActivityFocusBridge,
+        leftPanelFocusBridge,
+        rightPanelFocusBridge,
+    ]);
+
+    return (
+        <TabDragSessionContext.Provider value={tabDragSession}>
+        <div className={className} style={{ width: "100%", height: "100%", position: "relative" }} role="main" aria-label="Dockview Main Area" data-testid="main-dockview-host">
+            <SectionLayoutView
+                root={renderedRoot}
+                renderSection={(section: SectionNode<WorkbenchSectionData>) => (
+                    <SectionComponentHost section={section} registry={registry} />
+                )}
+                onResizeSection={(sectionId, ratio) => store.resizeSection(sectionId, ratio)}
+            />
+            <ActivityBarDragPreview
+                session={activityBarDragSession}
+                bar={leftActivityBarState}
+                renderIcon={(icon) => {
+                    const activity = activitiesById.get(icon.id);
+                    if (renderActivityIcon && activity) {
+                        return renderActivityIcon(activity);
+                    }
+                    return (icon.meta?.icon as ReactNode | undefined) ?? (
+                        <span style={{ fontSize: 14, fontWeight: 600 }}>{icon.symbol}</span>
+                    );
+                }}
+            />
+            <PanelSectionDragPreview
+                session={panelDragSession}
+                renderTab={(session) => {
+                    const activity = activitiesById.get(session.panelId);
+                    if (renderActivityIcon && activity) {
+                        return renderActivityIcon(activity);
+                    }
+                    return session.symbol;
+                }}
+            />
+        </div>
+        </TabDragSessionContext.Provider>
+    );
+}

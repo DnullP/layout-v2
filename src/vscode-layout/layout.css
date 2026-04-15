@@ -39,7 +39,6 @@
 .layout-v2__child-slot--split-entering {
   overflow: hidden;
   contain: layout paint;
-  transition: flex-basis 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* 子区域内部包装层：为新 section 内容滑入提供独立动画层。 */
@@ -53,8 +52,6 @@
 
 /* 新 section 的内容层：从对应边缘外侧滑入目标半区。 */
 .layout-v2__child-slot-inner--new {
-  will-change: transform;
-  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* 左右切分且新区在右侧时：新右区从右侧外部滑入。 */

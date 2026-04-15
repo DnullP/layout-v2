@@ -188,6 +188,8 @@ export function PanelSection(props: {
     const contentRef = useRef<HTMLDivElement | null>(null);
     const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const previousSlotLeftsRef = useRef<Record<string, number>>({});
+    const previousPanelsRef = useRef(panelSection?.panels);
+    const pendingPressRef = useRef<PanelSectionPointerPressPayload | null>(null);
     const dragSession = controlledDragSession ?? internalDragSession;
     const dragSessionRef = useRef<PanelSectionDragSession | null>(dragSession);
     const updateDragSession = onDragSessionChange ?? setInternalDragSession;
@@ -215,6 +217,40 @@ export function PanelSection(props: {
         activePanel &&
         activePanel.id === dragSession.panelId,
     );
+
+    // --- Pending press → drag session promotion ---
+    // Pointer press is stored into pendingPressRef without triggering state.
+    // Only after the pointer moves beyond the drag threshold do we create a
+    // drag session, avoiding a full registry-level re-render on simple clicks.
+    useEffect(() => {
+        function handlePendingMove(event: PointerEvent): void {
+            const press = pendingPressRef.current;
+            if (!press || event.pointerId !== press.pointerId) return;
+            const distance = Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY);
+            if (distance >= DRAG_START_DISTANCE_PX) {
+                pendingPressRef.current = null;
+                const session = buildPanelSectionDragSession(press);
+                session.phase = "dragging";
+                session.pointerX = event.clientX;
+                session.pointerY = event.clientY;
+                updateDragSession(session);
+            }
+        }
+        function handlePendingEnd(event: PointerEvent): void {
+            const press = pendingPressRef.current;
+            if (!press || event.pointerId !== press.pointerId) return;
+            pendingPressRef.current = null;
+        }
+
+        window.addEventListener("pointermove", handlePendingMove);
+        window.addEventListener("pointerup", handlePendingEnd);
+        window.addEventListener("pointercancel", handlePendingEnd);
+        return () => {
+            window.removeEventListener("pointermove", handlePendingMove);
+            window.removeEventListener("pointerup", handlePendingEnd);
+            window.removeEventListener("pointercancel", handlePendingEnd);
+        };
+    }, [updateDragSession]);
 
     useEffect(() => {
         if (!dragSession || dragSession.sourcePanelSectionId !== panelSection.id) {
@@ -320,7 +356,11 @@ export function PanelSection(props: {
 
     useLayoutEffect(() => {
         const nextSlotLefts: Record<string, number> = {};
-        const disableFlipAnimation = dragSession?.phase === "dragging";
+        const draggingId = dragSession?.phase === "dragging" ? dragSession.panelId : null;
+        // Only animate when panels actually reordered; position changes caused by
+        // external layout shifts (e.g. section resize) should just update the ref.
+        const panelsReordered = previousPanelsRef.current !== panelSection.panels;
+        previousPanelsRef.current = panelSection.panels;
 
         panelSection.panels.forEach((panel) => {
             const slotElement = slotRefs.current[panel.id];
@@ -332,13 +372,14 @@ export function PanelSection(props: {
             const previousLeft = previousSlotLeftsRef.current[panel.id];
             nextSlotLefts[panel.id] = nextLeft;
 
-            if (disableFlipAnimation) {
+            // Skip animating the panel being dragged (shown as placeholder)
+            if (panel.id === draggingId) {
                 slotElement.style.transition = "none";
                 slotElement.style.transform = "none";
                 return;
             }
 
-            if (previousLeft === undefined || previousLeft === nextLeft) {
+            if (!panelsReordered || previousLeft === undefined || previousLeft === nextLeft) {
                 return;
             }
 
@@ -353,7 +394,7 @@ export function PanelSection(props: {
         });
 
         previousSlotLeftsRef.current = nextSlotLefts;
-    }, [dragSession?.phase, panelSection.panels]);
+    }, [dragSession?.phase, dragSession?.panelId, panelSection.panels]);
 
     useEffect(() => {
         if ((!interactive && !allowContentPreview) || !dragSession || dragSession.phase !== "dragging") {
@@ -485,12 +526,30 @@ export function PanelSection(props: {
         }
 
         const barRect = barRef.current?.getBoundingClientRect() ?? null;
+        const contentRect = contentRef.current?.getBoundingClientRect() ?? null;
+        const isCurrentSectionContentTarget = Boolean(
+            activityDragSession.contentTarget?.area === "content" &&
+            activityDragSession.contentTarget.panelSectionId === panelSection.id,
+        );
+        const { contentBounds, shouldPreferStableContentTarget } = resolvePreviewContentSession({
+            currentTarget: activityDragSession.contentTarget,
+            isCurrentSectionContentTarget,
+            contentRect,
+            pointerX: activityDragSession.pointerX,
+            pointerY: activityDragSession.pointerY,
+        });
         const insideBar = Boolean(
+            !shouldPreferStableContentTarget &&
             barRect &&
             activityDragSession.pointerX >= barRect.left &&
             activityDragSession.pointerX <= barRect.right &&
             activityDragSession.pointerY >= barRect.top &&
             activityDragSession.pointerY <= barRect.bottom,
+        );
+        const insideContent = !panelSection.isCollapsed && isPointerInsidePreviewBounds(
+            contentBounds,
+            activityDragSession.pointerX,
+            activityDragSession.pointerY,
         );
 
         if (insideBar) {
@@ -513,18 +572,55 @@ export function PanelSection(props: {
                         panelSectionId: panelSection.id,
                         targetIndex,
                     },
+                    contentTarget: null,
                 });
             }
             return;
         }
 
-        if (activityDragSession.panelTarget?.panelSectionId === panelSection.id) {
+        if (insideContent && contentBounds) {
+            const nextTarget: PanelSectionHoverTarget = {
+                area: "content",
+                leafSectionId,
+                anchorLeafSectionId: resolvePreviewAnchorLeafSectionId({
+                    currentTarget: activityDragSession.contentTarget,
+                    isCurrentSectionContentTarget,
+                    committedLeafSectionId,
+                }),
+                panelSectionId: panelSection.id,
+                splitSide: resolvePreviewSplitSide(
+                    contentBounds,
+                    activityDragSession.pointerX,
+                    activityDragSession.pointerY,
+                    {
+                        top: "top",
+                        bottom: "bottom",
+                    } as const,
+                ),
+                contentBounds,
+            };
+
+            if (!arePreviewHoverTargetsEqual(activityDragSession.contentTarget, nextTarget, getPanelSectionHoverTargetId)) {
+                updateActivityDragSession({
+                    ...activityDragSession,
+                    panelTarget: null,
+                    contentTarget: nextTarget,
+                });
+            }
+            return;
+        }
+
+        const needsClearPanelTarget = activityDragSession.panelTarget?.panelSectionId === panelSection.id;
+        const needsClearContentTarget = activityDragSession.contentTarget?.leafSectionId === leafSectionId;
+
+        if (needsClearPanelTarget || needsClearContentTarget) {
             updateActivityDragSession({
                 ...activityDragSession,
-                panelTarget: null,
+                panelTarget: needsClearPanelTarget ? null : activityDragSession.panelTarget,
+                contentTarget: needsClearContentTarget ? null : activityDragSession.contentTarget,
             });
         }
-    }, [activityDragSession, interactive, panelSection.id, panelSection.panels, updateActivityDragSession]);
+    }, [activityDragSession, committedLeafSectionId, interactive, leafSectionId, panelSection.id, panelSection.isCollapsed, panelSection.panels, updateActivityDragSession]);
 
     const pointerInsideBar = Boolean(
         interactive &&
@@ -540,6 +636,13 @@ export function PanelSection(props: {
         dragSession.hoverTarget.splitSide,
     );
     const activityPointerInsideBar = Boolean(activityDropIndex !== null);
+    const activityPointerInsideContent = Boolean(
+        interactive &&
+        activityDragSession?.phase === "dragging" &&
+        activityDragSession.contentTarget?.area === "content" &&
+        activityDragSession.contentTarget.panelSectionId === panelSection.id &&
+        activityDragSession.contentTarget.splitSide,
+    );
 
     return (
         <div
@@ -603,7 +706,7 @@ export function PanelSection(props: {
                                             return;
                                         }
 
-                                        updateDragSession(buildPanelSectionDragSession({
+                                        pendingPressRef.current = {
                                             leafSectionId,
                                             panelSectionId: panelSection.id,
                                             panelId: panel.id,
@@ -615,7 +718,7 @@ export function PanelSection(props: {
                                             symbol: panel.symbol,
                                             content: panel.content,
                                             tone: panel.tone,
-                                        }));
+                                        };
                                     }}
                                 >
                                     {renderPanelTab ? renderPanelTab(panel) : (
@@ -652,13 +755,16 @@ export function PanelSection(props: {
                 className={[
                     "layout-v2-panel-section__content",
                     panelSection.isCollapsed ? "layout-v2-panel-section__content--collapsed" : "",
-                    pointerInsideContent ? "layout-v2-panel-section__content--drag-over" : "",
+                    pointerInsideContent || activityPointerInsideContent ? "layout-v2-panel-section__content--drag-over" : "",
                 ].filter(Boolean).join(" ")}
             >
                 <div className="layout-v2-panel-section__content-inner">
                     {activePanel && !shouldHideActivePane ? (
                         <div className={["layout-v2-panel-section__pane", getPanelToneClassName(activePanel.tone)].join(" ")}>
-                            <div className="layout-v2-panel-section__pane-header">
+                            <div
+                                className="layout-v2-panel-section__pane-header"
+                                {...(focusBridge?.getHeaderAttributes?.(panelSection, activePanel) ?? {})}
+                            >
                                 <span className="layout-v2-panel-section__pane-symbol">{activePanel.symbol}</span>
                                 <span className="layout-v2-panel-section__pane-title">{activePanel.label}</span>
                             </div>
@@ -667,7 +773,10 @@ export function PanelSection(props: {
                             </div>
                         </div>
                     ) : (
-                        <div className="layout-v2-panel-section__empty-pane">Drop panel here or pick one from the bar</div>
+                        <div
+                            className="layout-v2-panel-section__empty-pane"
+                            {...(focusBridge?.getEmptyAttributes?.(panelSection) ?? {})}
+                        >Drop panel here or pick one from the bar</div>
                     )}
                 </div>
             </div>

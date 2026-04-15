@@ -75,8 +75,9 @@ export function ActivityBarIcon(props: {
   renderIcon?: ActivityBarIconRenderer;
   onSelect: () => void;
   onPointerPress: (payload: ActivityBarPointerPressPayload) => void;
+  onContextMenu?: (iconId: string, event: { clientX: number; clientY: number }) => void;
 }): ReactNode {
-  const { barId, index, icon, selected, dragging, focusAttributes, renderIcon, onSelect, onPointerPress } = props;
+  const { barId, index, icon, selected, dragging, focusAttributes, renderIcon, onSelect, onPointerPress, onContextMenu } = props;
   const className = [
     "layout-v2-activity-bar__icon",
     selected ? "layout-v2-activity-bar__icon--selected" : "",
@@ -115,6 +116,12 @@ export function ActivityBarIcon(props: {
       onClick={onSelect}
       data-icon-id={icon.id}
       onPointerDown={handlePointerDown}
+      onContextMenu={(event) => {
+        if (onContextMenu) {
+          event.preventDefault();
+          onContextMenu(icon.id, { clientX: event.clientX, clientY: event.clientY });
+        }
+      }}
     >
       {renderIcon ? renderIcon(icon) : (
         <span className="layout-v2-activity-bar__icon-symbol">{icon.symbol}</span>

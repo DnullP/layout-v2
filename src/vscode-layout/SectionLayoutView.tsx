@@ -128,7 +128,7 @@ interface SplitAnimationSnapshot {
  * @constant SPLIT_ANIMATION_DURATION_MS
  * @description section split 入场动画时长。
  */
-const SPLIT_ANIMATION_DURATION_MS = 240;
+const SPLIT_ANIMATION_DURATION_MS = 0;
 
 /**
  * @interface SplitDividerProps
@@ -592,7 +592,7 @@ export function SectionLayoutView<T>(props: SectionLayoutViewProps<T>): ReactNod
     const nextAnimations = nextAnimationState.animations;
     animationTokenRef.current += Object.keys(nextAnimations).length + 1;
     previousSnapshotsRef.current = nextAnimationState.snapshots;
-    if (Object.keys(nextAnimations).length > 0) {
+    if (SPLIT_ANIMATION_DURATION_MS > 0 && Object.keys(nextAnimations).length > 0) {
       setSplitAnimations((currentAnimations) => ({
         ...currentAnimations,
         ...nextAnimations,

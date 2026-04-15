@@ -31,7 +31,7 @@
  *   - TabSection                  组件本体
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import {
   arePreviewHoverTargetsEqual,
   resolvePreviewAnchorLeafSectionId,
@@ -62,6 +62,7 @@ export type {
 
 export type { TabSectionTabDefinition } from "./tabSectionModel";
 
+export const TabDragSessionContext = createContext<TabSectionDragSession | null>(null);
 /**
  * @type TabSectionContentRenderer
  * @description 单个 tab 内容渲染函数。
@@ -266,7 +267,7 @@ function resolveTabCardBody(
  */
 export function TabSection(props: {
   leafSectionId: string;
-  committedLeafSectionId: string;
+  committedLeafSectionId?: string;
   tabSectionId: string;
   tabSection: TabSectionStateItem | null;
   dragSession?: TabSectionDragSession | null;
@@ -284,13 +285,13 @@ export function TabSection(props: {
 }): ReactNode {
   const {
     leafSectionId,
-    committedLeafSectionId,
+    committedLeafSectionId: committedLeafSectionIdProp,
     tabSectionId,
     tabSection,
     dragSession: controlledDragSession,
     focusBridge,
-    interactive = true,
-    allowContentPreview = false,
+    interactive: interactiveProp,
+    allowContentPreview: allowContentPreviewProp,
     contentRegistry,
     renderTabContent,
     renderTabTitle,
@@ -300,6 +301,7 @@ export function TabSection(props: {
     onCloseTab,
     onMoveTab,
   } = props;
+  const contextDragSession = useContext(TabDragSessionContext);
   const [internalDragSession, setInternalDragSession] = useState<TabSectionDragSession | null>(null);
   const sectionRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
@@ -307,9 +309,20 @@ export function TabSection(props: {
   const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previousSlotLeftsRef = useRef<Record<string, number>>({});
   const hoverTargetClearFrameRef = useRef<number>(0);
-  const dragSession = controlledDragSession ?? internalDragSession;
+  const dragSession = controlledDragSession ?? contextDragSession ?? internalDragSession;
   const dragSessionRef = useRef<TabSectionDragSession | null>(dragSession);
   const updateDragSession = onDragSessionChange ?? setInternalDragSession;
+
+  // Derive committedLeafSectionId, interactive, allowContentPreview from drag session
+  // when NOT explicitly provided (context-driven mode).
+  const isDragging = Boolean(dragSession);
+  const isPreviewLeaf = isDragging && leafSectionId.startsWith("preview-section");
+  const committedLeafSectionId = committedLeafSectionIdProp ??
+    (isPreviewLeaf && dragSession?.hoverTarget?.anchorLeafSectionId
+      ? dragSession.hoverTarget.anchorLeafSectionId
+      : leafSectionId);
+  const interactive = interactiveProp ?? !isPreviewLeaf;
+  const allowContentPreview = allowContentPreviewProp ?? isPreviewLeaf;
 
   dragSessionRef.current = dragSession;
 
@@ -749,6 +762,11 @@ export function TabSection(props: {
           "layout-v2-tab-section__content",
           pointerInsideContent ? "layout-v2-tab-section__content--drag-over" : "",
         ].filter(Boolean).join(" ")}
+        onPointerDown={() => {
+          if (activeCard) {
+            onFocusTab(activeCard.id);
+          }
+        }}
       >
         {activeCard && !shouldHideActiveCard ? (
           <div className={["layout-v2-tab-section__card", getCardToneClassName(activeCard.tone)].join(" ")}>

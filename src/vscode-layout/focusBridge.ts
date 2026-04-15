@@ -9,6 +9,8 @@ export interface PanelSectionFocusBridge<TSection, TPanel> {
     getSectionAttributes?: (section: TSection) => LayoutFocusAttributes | undefined;
     getPanelAttributes?: (section: TSection, panel: TPanel) => LayoutFocusAttributes | undefined;
     getContentAttributes?: (section: TSection, panel: TPanel | null) => LayoutFocusAttributes | undefined;
+    getEmptyAttributes?: (section: TSection) => LayoutFocusAttributes | undefined;
+    getHeaderAttributes?: (section: TSection, panel: TPanel) => LayoutFocusAttributes | undefined;
 }
 
 export interface TabSectionFocusBridge<TSection, TTab> {

@@ -16,6 +16,7 @@ import {
 import {
     canResizeSectionSplit,
     isSectionHidden,
+    SECTION_FIXED_SIZE_META_KEY,
     type SectionNode,
     type SectionSplitDirection,
 } from "./layoutModel";
@@ -54,7 +55,7 @@ interface SplitAnimationSnapshot {
     newChildIndex: 0 | 1;
 }
 
-const SPLIT_ANIMATION_DURATION_MS = 240;
+const SPLIT_ANIMATION_DURATION_MS = 0;
 
 interface SplitDividerProps {
     direction: SectionSplitDirection;
@@ -221,20 +222,44 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
         const startRatio = ratio;
 
         setIsDragging(true);
+        document.documentElement.setAttribute("data-layout-resizing", "true");
+
+        let rafId: number | null = null;
+        let lastPointer = startPointer;
 
         const handlePointerMove = (moveEvent: PointerEvent): void => {
-            const nextPointer = direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
-            const delta = nextPointer - startPointer;
-            const nextRatio = clampRatioByContainer(
+            lastPointer = direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
+            if (rafId !== null) {
+                return;
+            }
+            rafId = window.requestAnimationFrame(() => {
+                rafId = null;
+                const delta = lastPointer - startPointer;
+                const nextRatio = clampRatioByContainer(
+                    (startRatio * totalSize + delta) / totalSize,
+                    totalSize,
+                    minSectionSize,
+                );
+                onResize(nextRatio);
+            });
+        };
+
+        const handlePointerUp = (): void => {
+            if (rafId !== null) {
+                window.cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+            // Flush final position
+            const delta = lastPointer - startPointer;
+            const finalRatio = clampRatioByContainer(
                 (startRatio * totalSize + delta) / totalSize,
                 totalSize,
                 minSectionSize,
             );
-            onResize(nextRatio);
-        };
+            onResize(finalRatio);
 
-        const handlePointerUp = (): void => {
             setIsDragging(false);
+            document.documentElement.removeAttribute("data-layout-resizing");
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
         };
@@ -281,6 +306,57 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
     const splitAnimation = splitAnimations[node.id] ?? null;
     const [isSplitAnimationEntered, setIsSplitAnimationEntered] = useState(false);
 
+    // --- Hide/show animation state ---
+    const [hideAnimPhase, setHideAnimPhase] = useState<"idle" | "collapsing" | "expanding">("idle");
+    const [isHideAnimEntered, setIsHideAnimEntered] = useState(false);
+    // Tracks which child (0, 1, or -1 for none) just toggled visibility.
+    const toggledChildIndexRef = useRef<0 | 1 | -1>(-1);
+
+    const isFirstChildHidden = node.split ? isSectionHidden(node.split.children[0]) : false;
+    const isSecondChildHidden = node.split ? isSectionHidden(node.split.children[1]) : false;
+    const prevFirstHiddenRef = useRef(isFirstChildHidden);
+    const prevSecondHiddenRef = useRef(isSecondChildHidden);
+
+    useLayoutEffect(() => {
+        const prevFirstHidden = prevFirstHiddenRef.current;
+        const prevSecondHidden = prevSecondHiddenRef.current;
+        prevFirstHiddenRef.current = isFirstChildHidden;
+        prevSecondHiddenRef.current = isSecondChildHidden;
+
+        const firstChanged = prevFirstHidden !== isFirstChildHidden;
+        const secondChanged = prevSecondHidden !== isSecondChildHidden;
+
+        if (!firstChanged && !secondChanged) return;
+
+        toggledChildIndexRef.current = firstChanged ? 0 : 1;
+
+        if (SPLIT_ANIMATION_DURATION_MS <= 0) {
+            // No animation: skip directly to idle.
+            return;
+        }
+
+        // A child toggled visibility — trigger collapse/expand animation.
+        const isCollapsing = (isFirstChildHidden && !prevFirstHidden) || (isSecondChildHidden && !prevSecondHidden);
+        setHideAnimPhase(isCollapsing ? "collapsing" : "expanding");
+        setIsHideAnimEntered(false);
+
+        // Kick to next frame so the initial state is painted, then set target state.
+        const frameId = requestAnimationFrame(() => {
+            setIsHideAnimEntered(true);
+        });
+        // Safety timeout: if transitionEnd doesn't fire, clean up.
+        const timeoutId = setTimeout(() => {
+            setHideAnimPhase("idle");
+            setIsHideAnimEntered(false);
+            toggledChildIndexRef.current = -1;
+        }, SPLIT_ANIMATION_DURATION_MS + 50);
+
+        return () => {
+            cancelAnimationFrame(frameId);
+            clearTimeout(timeoutId);
+        };
+    }, [isFirstChildHidden, isSecondChildHidden]);
+
     useLayoutEffect(() => {
         if (!splitAnimation) {
             setIsSplitAnimationEntered(false);
@@ -310,14 +386,15 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
     }
 
     const [firstChild, secondChild] = node.split.children;
-    const isFirstChildHidden = isSectionHidden(firstChild);
-    const isSecondChildHidden = isSectionHidden(secondChild);
 
     if (isFirstChildHidden && isSecondChildHidden) {
         return null;
     }
 
-    if (isFirstChildHidden) {
+    // If a child just toggled visibility and we're animating, keep both in DOM.
+    const isAnimating = hideAnimPhase !== "idle";
+
+    if (isFirstChildHidden && !isAnimating) {
         return (
             <SectionNodeView
                 node={secondChild}
@@ -330,7 +407,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
         );
     }
 
-    if (isSecondChildHidden) {
+    if (isSecondChildHidden && !isAnimating) {
         return (
             <SectionNodeView
                 node={firstChild}
@@ -351,22 +428,78 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
     ].join(" ");
     const firstTargetRatio = node.split.ratio;
     const secondTargetRatio = 1 - node.split.ratio;
-    const firstChildStyle = splitAnimation
-        ? {
+
+    // Compute child styles — hide animation overrides split animation and normal flex.
+    let firstChildStyle: CSSProperties;
+    let secondChildStyle: CSSProperties;
+    let firstSlotClass = "";
+    let secondSlotClass = "";
+
+    if (isAnimating) {
+        // Two-step animation: paint starting state, then rAF sets target state.
+        // CSS transition on .layout-v2__child-slot--hide-animating handles the interpolation.
+        const toggledIdx = toggledChildIndexRef.current;
+
+        if (hideAnimPhase === "collapsing") {
+            if (!isHideAnimEntered) {
+                // Starting state: both at natural ratio (before collapsing).
+                firstChildStyle = { flex: `${firstTargetRatio} 1 0%`, overflow: "hidden" };
+                secondChildStyle = { flex: `${secondTargetRatio} 1 0%`, overflow: "hidden" };
+            } else {
+                // Target state: toggled child collapses to 0, sibling takes all space.
+                firstChildStyle = toggledIdx === 0
+                    ? { flex: "0 0 0%", overflow: "hidden" }
+                    : { flex: "1 1 0%", overflow: "hidden" };
+                secondChildStyle = toggledIdx === 1
+                    ? { flex: "0 0 0%", overflow: "hidden" }
+                    : { flex: "1 1 0%", overflow: "hidden" };
+            }
+        } else {
+            // Expanding: toggled child starts from 0, expands to its ratio.
+            if (!isHideAnimEntered) {
+                // Starting state: toggled child at 0.
+                firstChildStyle = toggledIdx === 0
+                    ? { flex: "0 0 0%", overflow: "hidden" }
+                    : { flex: "1 1 0%", overflow: "hidden" };
+                secondChildStyle = toggledIdx === 1
+                    ? { flex: "0 0 0%", overflow: "hidden" }
+                    : { flex: "1 1 0%", overflow: "hidden" };
+            } else {
+                // Target state: both at natural ratios.
+                firstChildStyle = { flex: `${firstTargetRatio} 1 0%`, overflow: "hidden" };
+                secondChildStyle = { flex: `${secondTargetRatio} 1 0%`, overflow: "hidden" };
+            }
+        }
+        firstSlotClass = "layout-v2__child-slot--hide-animating";
+        secondSlotClass = "layout-v2__child-slot--hide-animating";
+    } else if (splitAnimation) {
+        firstChildStyle = {
             flex: "0 0 auto",
             flexBasis: splitAnimation.newChildIndex === 0
                 ? (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "0%")
                 : (isSplitAnimationEntered ? `${firstTargetRatio * 100}%` : "100%"),
-        }
-        : buildChildStyle(node.split.ratio, true);
-    const secondChildStyle = splitAnimation
-        ? {
+        };
+        secondChildStyle = {
             flex: "0 0 auto",
             flexBasis: splitAnimation.newChildIndex === 1
                 ? (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "0%")
                 : (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "100%"),
-        }
-        : buildChildStyle(node.split.ratio, false);
+        };
+    } else {
+        const firstFixedSize = firstChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
+        const secondFixedSize = secondChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
+
+        firstChildStyle = firstFixedSize != null
+            ? { flex: `0 0 ${firstFixedSize}px` }
+            : secondFixedSize != null
+                ? { flex: "1 1 0%" }
+                : buildChildStyle(node.split.ratio, true);
+        secondChildStyle = secondFixedSize != null
+            ? { flex: `0 0 ${secondFixedSize}px` }
+            : firstFixedSize != null
+                ? { flex: "1 1 0%" }
+                : buildChildStyle(node.split.ratio, false);
+    }
 
     return (
         <div className={branchClassName} data-section-id={node.id}>
@@ -375,8 +508,10 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                     "layout-v2__child-slot",
                     splitAnimation ? "layout-v2__child-slot--split-entering" : "",
                     splitAnimation?.newChildIndex === 0 ? "layout-v2__child-slot--new" : "",
+                    firstSlotClass,
                 ].filter(Boolean).join(" ")}
                 style={firstChildStyle}
+                onTransitionEnd={isAnimating ? () => { setHideAnimPhase("idle"); setIsHideAnimEntered(false); toggledChildIndexRef.current = -1; } : undefined}
             >
                 <div
                     className={[
@@ -409,8 +544,10 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                     "layout-v2__child-slot",
                     splitAnimation ? "layout-v2__child-slot--split-entering" : "",
                     splitAnimation?.newChildIndex === 1 ? "layout-v2__child-slot--new" : "",
+                    secondSlotClass,
                 ].filter(Boolean).join(" ")}
                 style={secondChildStyle}
+                onTransitionEnd={isAnimating ? () => { setHideAnimPhase("idle"); setIsHideAnimEntered(false); toggledChildIndexRef.current = -1; } : undefined}
             >
                 <div
                     className={[
@@ -466,7 +603,7 @@ export function SectionLayoutView<T>(props: SectionLayoutViewProps<T>): ReactNod
         const nextAnimations = nextAnimationState.animations;
         animationTokenRef.current += Object.keys(nextAnimations).length + 1;
         previousSnapshotsRef.current = nextAnimationState.snapshots;
-        if (Object.keys(nextAnimations).length > 0) {
+        if (SPLIT_ANIMATION_DURATION_MS > 0 && Object.keys(nextAnimations).length > 0) {
             setSplitAnimations((currentAnimations) => ({
                 ...currentAnimations,
                 ...nextAnimations,

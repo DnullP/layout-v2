@@ -29,6 +29,7 @@ export const SECTION_SPLIT_HORIZONTAL: SectionSplitDirection = "horizontal";
 export const SECTION_SPLIT_VERTICAL: SectionSplitDirection = "vertical";
 
 export const SECTION_HIDDEN_META_KEY = "layout-v2:hidden";
+export const SECTION_FIXED_SIZE_META_KEY = "layout-v2:fixedSize";
 
 export interface SectionDraft<T> {
     id?: string;

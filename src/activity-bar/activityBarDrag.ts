@@ -1,4 +1,5 @@
 import { type ActivityBarDragPayload } from "./ActivityBarIcon";
+import { type PanelSectionHoverTarget } from "../panel-section/panelSectionDrag";
 
 export interface ActivityBarDragSession extends ActivityBarDragPayload {
     currentBarId: string;
@@ -6,6 +7,7 @@ export interface ActivityBarDragSession extends ActivityBarDragPayload {
         panelSectionId: string;
         targetIndex: number;
     } | null;
+    contentTarget: PanelSectionHoverTarget | null;
     pointerId: number;
     originX: number;
     originY: number;

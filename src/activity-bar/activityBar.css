@@ -26,6 +26,7 @@
 /* icon 列表：从上至下排列 icon。 */
 .layout-v2-activity-bar__icon-list {
   width: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -39,6 +40,11 @@
   flex-direction: column;
   align-items: center;
   will-change: transform;
+}
+
+/* bottom section 起始 icon：自动推到列表底部。 */
+.layout-v2-activity-bar__icon-slot--bottom-start {
+  margin-top: auto;
 }
 
 /* icon 拖拽占位：当 icon 被拖起后，在实时落点留出空位。 */
@@ -62,9 +68,6 @@
   justify-content: center;
   cursor: pointer;
   touch-action: none;
-  transition:
-    color 140ms ease,
-    opacity 140ms ease;
 }
 
 /* icon hover 态：轻微提亮以表达可交互性。 */

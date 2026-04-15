@@ -109,6 +109,7 @@ function buildDragSessionFromPress(
     iconId: payload.iconId,
     currentBarId: payload.sourceBarId,
     panelTarget: null,
+    contentTarget: null,
     pointerId: payload.pointerId,
     originX: payload.clientX,
     originY: payload.clientY,
@@ -191,6 +192,8 @@ export function ActivityBar(props: {
   onActivateIcon?: (iconId: string) => void;
   onSelectIcon: (iconId: string) => void;
   onMoveIcon: (move: ActivityBarIconMove) => void;
+  onIconContextMenu?: (iconId: string, event: { clientX: number; clientY: number }) => void;
+  onBackgroundContextMenu?: (event: { clientX: number; clientY: number }) => void;
 }): ReactNode {
   const {
     bar,
@@ -204,6 +207,8 @@ export function ActivityBar(props: {
     onActivateIcon,
     onSelectIcon,
     onMoveIcon,
+    onIconContextMenu,
+    onBackgroundContextMenu,
   } = props;
   const [internalDragSession, setInternalDragSession] = useState<ActivityBarDragSession | null>(null);
   const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -386,6 +391,7 @@ export function ActivityBar(props: {
       ...dragSession,
       currentBarId: activityBar.id,
       panelTarget: null,
+      contentTarget: null,
       targetIndex,
     });
   }, [activityBar.icons, activityBar.id, dragSession, onMoveIcon, updateDragSession]);
@@ -471,6 +477,13 @@ export function ActivityBar(props: {
         },
         focusBridge?.getBarAttributes?.(activityBar),
       )}
+      onContextMenu={(event) => {
+        if (!onBackgroundContextMenu) return;
+        // Only fire on the bar background itself, not when an icon already handled it
+        if ((event.target as HTMLElement).closest("[data-layout-role='activity-icon']")) return;
+        event.preventDefault();
+        onBackgroundContextMenu({ clientX: event.clientX, clientY: event.clientY });
+      }}
       className={[
         "layout-v2-activity-bar",
         dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging"
@@ -479,48 +492,59 @@ export function ActivityBar(props: {
         isPointerInside || isPanelPointerInside ? "layout-v2-activity-bar--drag-over" : "",
       ].filter(Boolean).join(" ")}
     >
-      {/* icon 列表：默认从上至下排列，并通过拖拽在同栏或跨栏移动。 */}
+      {/* icon 列表：top section 图标从上对齐，bottom section 图标靠下对齐。 */}
       <div className="layout-v2-activity-bar__icon-list">
-        {activityBar.icons.map((icon, index) => (
-          <div
-            key={icon.id}
-            className="layout-v2-activity-bar__icon-slot"
-            ref={(element) => {
-              slotRefs.current[icon.id] = element;
-            }}
-          >
-            {isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === index ? (
-              <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
-            ) : null}
-            {draggingIconId === icon.id || draggingPanelId === icon.id ? (
-              <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
-            ) : (
-              <ActivityBarIcon
-                barId={activityBar.id}
-                index={index}
-                icon={icon}
-                selected={activityBar.selectedIconId === icon.id}
-                dragging={dragSession?.phase === "dragging" && dragSession.iconId === icon.id}
-                focusAttributes={mergeLayoutFocusAttributes(
-                  {
-                    "data-layout-role": "activity-icon",
-                    "data-layout-bar-id": activityBar.id,
-                    "data-layout-icon-id": icon.id,
-                  },
-                  focusBridge?.getIconAttributes?.(activityBar, icon),
-                )}
-                renderIcon={renderIcon}
-                onSelect={() => {
-                  onActivateIcon?.(icon.id);
-                  if (icon.activationMode !== "action") {
-                    onSelectIcon(icon.id);
-                  }
-                }}
-                onPointerPress={handlePointerPress}
-              />
-            )}
-          </div>
-        ))}
+        {activityBar.icons.map((icon, index) => {
+          const isBottomSection = (icon.meta as Record<string, unknown> | undefined)?.section === "bottom";
+          const prevIcon = activityBar.icons[index - 1];
+          const prevIsTop = prevIcon ? (prevIcon.meta as Record<string, unknown> | undefined)?.section !== "bottom" : true;
+          const showSpacer = isBottomSection && prevIsTop && index > 0;
+
+          return (
+            <div
+              key={icon.id}
+              className={[
+                "layout-v2-activity-bar__icon-slot",
+                showSpacer ? "layout-v2-activity-bar__icon-slot--bottom-start" : "",
+              ].filter(Boolean).join(" ")}
+              ref={(element) => {
+                slotRefs.current[icon.id] = element;
+              }}
+            >
+              {isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === index ? (
+                <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
+              ) : null}
+              {draggingIconId === icon.id || draggingPanelId === icon.id ? (
+                <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
+              ) : (
+                <ActivityBarIcon
+                  barId={activityBar.id}
+                  index={index}
+                  icon={icon}
+                  selected={activityBar.selectedIconId === icon.id}
+                  dragging={dragSession?.phase === "dragging" && dragSession.iconId === icon.id}
+                  focusAttributes={mergeLayoutFocusAttributes(
+                    {
+                      "data-layout-role": "activity-icon",
+                      "data-layout-bar-id": activityBar.id,
+                      "data-layout-icon-id": icon.id,
+                    },
+                    focusBridge?.getIconAttributes?.(activityBar, icon),
+                  )}
+                  renderIcon={renderIcon}
+                  onSelect={() => {
+                    onActivateIcon?.(icon.id);
+                    if (icon.activationMode !== "action") {
+                      onSelectIcon(icon.id);
+                    }
+                  }}
+                  onPointerPress={handlePointerPress}
+                  onContextMenu={onIconContextMenu}
+                />
+              )}
+            </div>
+          );
+        })}
         <div
           className={[
             "layout-v2-activity-bar__tail-drop-target",

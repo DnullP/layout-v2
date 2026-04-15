@@ -28,11 +28,13 @@ import { useSectionLayout } from "../../src/vscode-layout/useSectionLayout";
 import {
     PREVIEW_SECTION_ID_PREFIX,
     buildActivityToPanelPreviewState,
+    buildActivityToContentPreviewState,
     buildCommittedTabLayoutState,
     buildPanelPreviewLayoutState,
     buildPanelToActivityPreviewState,
     buildPreviewLayoutState,
     closeTabInLayoutState,
+    commitActivityToContentDrop,
 } from "../exampleLayoutState";
 import { createActivityBarExampleState } from "./activityBarExample";
 import { createPanelSectionExampleState } from "./panelSectionExample";
@@ -113,6 +115,16 @@ export function SectionLayoutViewUsageExample(): ReactNode {
         ),
         [activityBars.state, activityDragSession, panelSections.state],
     );
+    const activityContentPreview = useMemo(
+        () => buildActivityToContentPreviewState(
+            layout.root,
+            panelSections.state,
+            activityDragSession?.phase === "dragging" ? activityDragSession.contentTarget : null,
+            findDraggedActivityIcon(activityDragSession, activityBars.state),
+        ),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [layout.root, panelSections.state, activityDragSession?.contentTarget, activityBars.state],
+    );
     const panelToActivityPreview = useMemo(
         () => buildPanelToActivityPreviewState(
             activityBars.state,
@@ -123,10 +135,10 @@ export function SectionLayoutViewUsageExample(): ReactNode {
         [activityBars.state, panelDragSession, panelSections.state],
     );
 
-    const renderedRoot = tabPreview?.root ?? panelPreview?.root ?? layout.root;
+    const renderedRoot = tabPreview?.root ?? panelPreview?.root ?? activityContentPreview?.root ?? layout.root;
     const renderedActivityBars = panelToActivityPreview ?? activityBars.state;
     const renderedTabSections = tabPreview?.state ?? tabSections.state;
-    const renderedPanelSections = activityToPanelPreview ?? panelPreview?.state ?? panelSections.state;
+    const renderedPanelSections = activityToPanelPreview ?? panelPreview?.state ?? activityContentPreview?.state ?? panelSections.state;
 
     const registry = useMemo(
         () => createSectionComponentRegistry<SectionTreeExampleData>({
@@ -141,6 +153,27 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                         onDragSessionChange={setActivityDragSession}
                         onDragSessionEnd={(session) => {
                             setActivityDragSession(null);
+
+                            // Activity icon → content area split
+                            if (session.contentTarget?.splitSide) {
+                                const icon = findDraggedActivityIcon(session, activityBars.state);
+                                const committed = commitActivityToContentDrop(
+                                    layout.root,
+                                    panelSections.state,
+                                    session.contentTarget,
+                                    icon,
+                                );
+                                if (!committed) {
+                                    return;
+                                }
+
+                                layout.resetLayout(committed.root);
+                                panelSections.resetState(committed.state);
+                                activityBars.resetState(removeActivityBarIcon(activityBars.state, session.currentBarId, session.iconId));
+                                return;
+                            }
+
+                            // Activity icon → panel bar drop
                             if (!session.panelTarget) {
                                 return;
                             }
@@ -170,7 +203,7 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                 const panelBinding = binding as SectionComponentBinding<"panel-section", { panelSectionId: string }>;
                 const committedLeafSectionId = resolveCommittedLeafSectionId(
                     section.id,
-                    panelDragSession?.hoverTarget?.anchorLeafSectionId,
+                    panelDragSession?.hoverTarget?.anchorLeafSectionId ?? activityDragSession?.contentTarget?.anchorLeafSectionId,
                 );
                 return (
                     <PanelSection
@@ -181,7 +214,7 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                         dragSession={panelDragSession}
                         activityDragSession={activityDragSession}
                         interactive={!isInteractivePreviewLeaf(section.id, Boolean(panelDragSession || activityDragSession))}
-                        allowContentPreview={isInteractivePreviewLeaf(section.id, Boolean(panelDragSession))}
+                        allowContentPreview={isInteractivePreviewLeaf(section.id, Boolean(panelDragSession || activityDragSession))}
                         onDragSessionChange={setPanelDragSession}
                         onDragSessionEnd={(session) => {
                             setPanelDragSession(null);
