@@ -18,6 +18,7 @@ import {
   type SectionComponentData,
 } from "./sectionComponent";
 import {
+  findPanelInSectionsState,
   movePanelSectionPanel,
   type PanelSectionsState,
   type PanelSectionStateItem,
@@ -49,6 +50,11 @@ export interface PanelWorkbenchLayoutState<TData extends SectionComponentData> {
 }
 
 export interface CommitPanelWorkbenchResult<TData extends SectionComponentData>
+  extends PanelWorkbenchLayoutState<TData> {
+  activePanelSectionId: string | null;
+}
+
+export interface FinalizePanelWorkbenchResult<TData extends SectionComponentData>
   extends PanelWorkbenchLayoutState<TData> {
   activePanelSectionId: string | null;
 }
@@ -304,25 +310,10 @@ export function buildPanelWorkbenchPreviewState<TData extends SectionComponentDa
   }
 
   if (!session.hoverTarget) {
-    // When dragging the last panel out of a single-panel section,
-    // preview the cleanup (section removal).
-    const sourceSection = state.sections[session.currentPanelSectionId];
-    if (!sourceSection || sourceSection.panels.length !== 1) {
-      return null;
-    }
-
-    const nextSourceSection: PanelSectionStateItem = {
-      ...sourceSection,
-      panels: [],
-      focusedPanelId: null,
-    };
-
-    return cleanupEmptyPanelWorkbenchSections(root, {
-      sections: {
-        ...state.sections,
-        [session.currentPanelSectionId]: nextSourceSection,
-      },
-    }, adapter);
+    // Panel drag pointer lifecycle currently lives in the source PanelSection.
+    // Keep the source section mounted until a concrete hover target exists,
+    // otherwise the source component unmounts mid-drag and loses pointermove/up.
+    return null;
   }
 
   if (session.hoverTarget.area !== "content") {
@@ -473,6 +464,51 @@ export function commitPanelWorkbenchDrop<TData extends SectionComponentData>(
   return {
     ...cleaned,
     activePanelSectionId: committedIds.panelSectionId,
+  };
+}
+
+export function finalizePanelWorkbenchDrop<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  state: PanelSectionsState,
+  session: PanelSectionDragSession | null,
+  adapter: PanelWorkbenchAdapter<TData>,
+): FinalizePanelWorkbenchResult<TData> | null {
+  const committed = commitPanelWorkbenchDrop(root, state, session, adapter);
+  if (committed) {
+    return committed;
+  }
+
+  if (!session || session.phase !== "dragging") {
+    return null;
+  }
+
+  let nextState = state;
+  let activePanelSectionId = session.currentPanelSectionId;
+
+  if (session.hoverTarget?.area === "bar") {
+    const targetSectionId = session.hoverTarget.panelSectionId;
+    const actualLocation = findPanelInSectionsState(nextState, session.panelId);
+    const targetSection = nextState.sections[targetSectionId];
+
+    if (actualLocation && targetSection) {
+      nextState = movePanelSectionPanel(nextState, {
+        sourceSectionId: actualLocation.section.id,
+        targetSectionId,
+        panelId: session.panelId,
+        targetIndex: session.hoverTarget.targetIndex ?? targetSection.panels.length,
+      });
+      activePanelSectionId = targetSectionId;
+    }
+  }
+
+  const cleaned = cleanupEmptyPanelWorkbenchSections(root, nextState, adapter);
+  if (nextState === state && cleaned.root === root && cleaned.state === nextState) {
+    return null;
+  }
+
+  return {
+    ...cleaned,
+    activePanelSectionId,
   };
 }
 

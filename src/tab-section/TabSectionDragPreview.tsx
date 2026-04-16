@@ -1,5 +1,8 @@
-import { type ReactNode } from "react";
-import { type TabSectionDragSession } from "./tabSectionDrag";
+import { useEffect, useRef, type ReactNode } from "react";
+import {
+    advanceTabSectionDragSessionPointer,
+    type TabSectionDragSession,
+} from "./tabSectionDrag";
 import { type TabSectionTabDefinition } from "./tabSectionModel";
 import "./tabSection.css";
 
@@ -13,8 +16,93 @@ function getCardToneClassName(tone: TabSectionTabDefinition["tone"]): string {
 
 export function TabSectionDragPreview(props: {
     session: TabSectionDragSession | null;
+    onSessionChange?: (session: TabSectionDragSession | null) => void;
+    onSessionEnd?: (session: TabSectionDragSession) => void;
 }): ReactNode {
-    const { session } = props;
+    const { session, onSessionChange, onSessionEnd } = props;
+    const sessionRef = useRef<TabSectionDragSession | null>(session);
+
+    sessionRef.current = session;
+
+    useEffect(() => {
+        if (!session || !onSessionChange) {
+            return;
+        }
+        const handleSessionChange: NonNullable<typeof onSessionChange> = onSessionChange;
+
+        const currentSession = session;
+        let pendingEvent: PointerEvent | null = null;
+        let frameId = 0;
+
+        function flushPointerMove(): TabSectionDragSession | null {
+            frameId = 0;
+            const event = pendingEvent;
+            pendingEvent = null;
+            if (!event) {
+                return sessionRef.current;
+            }
+
+            const baseSession = sessionRef.current ?? currentSession;
+            const nextSession = advanceTabSectionDragSessionPointer(
+                baseSession,
+                event.clientX,
+                event.clientY,
+            );
+
+            if (nextSession === baseSession) {
+                return baseSession;
+            }
+
+            sessionRef.current = nextSession;
+            handleSessionChange(nextSession);
+            return nextSession;
+        }
+
+        function handlePointerMove(event: PointerEvent): void {
+            const baseSession = sessionRef.current ?? currentSession;
+            if (event.pointerId !== baseSession.pointerId) {
+                return;
+            }
+
+            pendingEvent = event;
+            if (!frameId) {
+                frameId = window.requestAnimationFrame(flushPointerMove);
+            }
+        }
+
+        function handlePointerEnd(event: PointerEvent): void {
+            const baseSession = sessionRef.current ?? currentSession;
+            if (event.pointerId !== baseSession.pointerId) {
+                return;
+            }
+
+            let finalSession = sessionRef.current ?? currentSession;
+            if (frameId) {
+                window.cancelAnimationFrame(frameId);
+                finalSession = flushPointerMove() ?? finalSession;
+            }
+
+            sessionRef.current = null;
+            handleSessionChange(null);
+
+            if (finalSession?.phase === "dragging") {
+                onSessionEnd?.(finalSession);
+            }
+        }
+
+        window.addEventListener("pointermove", handlePointerMove);
+        window.addEventListener("pointerup", handlePointerEnd);
+        window.addEventListener("pointercancel", handlePointerEnd);
+
+        return () => {
+            if (frameId) {
+                window.cancelAnimationFrame(frameId);
+            }
+            window.removeEventListener("pointermove", handlePointerMove);
+            window.removeEventListener("pointerup", handlePointerEnd);
+            window.removeEventListener("pointercancel", handlePointerEnd);
+        };
+    }, [session, onSessionChange, onSessionEnd]);
 
     if (!session || session.phase !== "dragging") {
         return null;

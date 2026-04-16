@@ -24,12 +24,17 @@ import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
 import { type ActivityBarIconMove } from "../activity-bar/activityBarModel";
 import { PanelSection } from "../panel-section/PanelSection";
 import { PanelSectionDragPreview } from "../panel-section/PanelSectionDragPreview";
-import { type PanelSectionDragSession } from "../panel-section/panelSectionDrag";
+import {
+    isEndedPanelSectionDragSession,
+    type PanelSectionDragSession,
+} from "../panel-section/panelSectionDrag";
 import { TabSection, TabDragSessionContext } from "../tab-section/TabSection";
+import { TabSectionDragPreview } from "../tab-section/TabSectionDragPreview";
 import { type TabSectionDragSession } from "../tab-section/tabSectionDrag";
-import { type TabSectionTabDefinition, type TabSectionsState } from "../tab-section/tabSectionModel";
+import { type TabSectionTabDefinition, type TabSectionTabMove, type TabSectionsState } from "../tab-section/tabSectionModel";
 import { createVSCodeLayoutStore, useVSCodeLayoutStoreState, type VSCodeLayoutState, type VSCodeLayoutStore } from "./store";
 import {
+    applyTabWorkbenchTabMove,
     buildTabWorkbenchPreviewState,
     commitTabWorkbenchDrop,
     cleanupEmptyTabWorkbenchSections,
@@ -38,8 +43,9 @@ import {
 import {
     buildPanelWorkbenchPreviewState,
     buildActivityBarContentPreviewState,
-    commitPanelWorkbenchDrop,
     commitActivityBarContentDrop,
+    cleanupEmptyPanelWorkbenchSections,
+    finalizePanelWorkbenchDrop,
     isPanelWorkbenchPreviewLeaf,
     resolvePanelWorkbenchCommittedLeafSectionId,
     type PanelWorkbenchAdapter,
@@ -54,6 +60,7 @@ import {
     readWorkbenchTabPayload,
     WORKBENCH_MAIN_TAB_SECTION_ID,
     WORKBENCH_LEFT_ACTIVITY_BAR_ID,
+    WORKBENCH_LEFT_PANEL_SECTION_ID,
     WORKBENCH_RIGHT_PANEL_SECTION_ID,
 } from "./workbenchPreset";
 import type { ActivityBarFocusBridge } from "./focusBridge";
@@ -85,6 +92,8 @@ export interface VSCodeWorkbenchProps {
     initialSidebarState?: WorkbenchSidebarState;
     /** 初始 section 分割比例（sectionId → ratio）。 */
     initialSectionRatios?: Record<string, number>;
+    /** 空 panel section 是否隐藏 panel bar。 */
+    hideEmptyPanelBar?: boolean;
 
     /** 渲染 activity bar icon。 */
     renderActivityIcon?: (activity: WorkbenchActivityDefinition) => ReactNode;
@@ -101,6 +110,8 @@ export interface VSCodeWorkbenchProps {
     onSidebarStateChange?: (state: WorkbenchSidebarState) => void;
     /** 活跃 tab 变化回调。 */
     onActiveTabChange?: (tabId: string | null) => void;
+    /** tab 关闭回调。 */
+    onCloseTab?: (tabId: string) => void;
     /** activity icon 右键菜单回调。 */
     onActivityIconContextMenu?: (iconId: string, event: { clientX: number; clientY: number }) => void;
     /** activity icon 拖拽到面板内容区触发分裂后的回调。 */
@@ -132,6 +143,99 @@ function resolveActiveTabSectionId(state: VSCodeLayoutState<WorkbenchSectionData
         return preferred;
     }
     return Object.keys(state.tabSections.sections)[0] ?? null;
+}
+
+export function isCloseActiveTabShortcut(
+    event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "defaultPrevented">,
+): boolean {
+    if (event.defaultPrevented || event.altKey || event.shiftKey) {
+        return false;
+    }
+
+    const key = event.key.toLowerCase();
+    const isCloseKey = event.code === "KeyW" || key === "w";
+    return isCloseKey && (event.metaKey || event.ctrlKey);
+}
+
+/**
+ * Shallow-compare two panel section items to avoid unnecessary store updates.
+ * Returns true when panels list, focusedPanelId, and isCollapsed are identical.
+ */
+function arePanelSectionsEqual(a: PanelSectionStateItem, b: PanelSectionStateItem): boolean {
+    if (a === b) return true;
+    if (a.focusedPanelId !== b.focusedPanelId) return false;
+    if (a.isCollapsed !== b.isCollapsed) return false;
+    if (a.isRoot !== b.isRoot) return false;
+    if (a.panels.length !== b.panels.length) return false;
+    for (let i = 0; i < a.panels.length; i++) {
+        if (a.panels[i].id !== b.panels[i].id) return false;
+        if (a.panels[i].label !== b.panels[i].label) return false;
+    }
+    return true;
+}
+
+function reconcileDeclarativePanelSection(
+    existing: PanelSectionStateItem | undefined,
+    next: PanelSectionStateItem,
+): PanelSectionStateItem {
+    if (!existing) {
+        return next;
+    }
+
+    const nextPanelsById = new Map(next.panels.map((panel) => [panel.id, panel]));
+    const reconciledPanels: PanelSectionPanelDefinition[] = [];
+    const seenPanelIds = new Set<string>();
+
+    for (const panel of existing.panels) {
+        const updatedPanel = nextPanelsById.get(panel.id);
+        if (!updatedPanel) {
+            continue;
+        }
+        reconciledPanels.push(updatedPanel);
+        seenPanelIds.add(panel.id);
+    }
+
+    for (const panel of next.panels) {
+        if (seenPanelIds.has(panel.id)) {
+            continue;
+        }
+        reconciledPanels.push(panel);
+    }
+
+    const focusedPanelId = reconciledPanels.some((panel) => panel.id === next.focusedPanelId)
+        ? next.focusedPanelId
+        : (reconciledPanels[0]?.id ?? null);
+
+    return {
+        ...next,
+        panels: reconciledPanels,
+        focusedPanelId,
+        isCollapsed: existing.isCollapsed,
+    };
+}
+
+/**
+ * Shallow-compare two activity-bars state objects.
+ * Returns true when both contain the same bars with the same icons and selection.
+ */
+function areActivityBarsEqual(
+    a: { bars: Record<string, { id: string; icons: Array<{ id: string }>; selectedIconId: string | null }> },
+    b: { bars: Record<string, { id: string; icons: Array<{ id: string }>; selectedIconId: string | null }> },
+): boolean {
+    const aKeys = Object.keys(a.bars);
+    const bKeys = Object.keys(b.bars);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const key of aKeys) {
+        const aBar = a.bars[key];
+        const bBar = b.bars[key];
+        if (!aBar || !bBar) return false;
+        if (aBar.selectedIconId !== bBar.selectedIconId) return false;
+        if (aBar.icons.length !== bBar.icons.length) return false;
+        for (let i = 0; i < aBar.icons.length; i++) {
+            if (aBar.icons[i].id !== bBar.icons[i].id) return false;
+        }
+    }
+    return true;
 }
 
 function collectSectionRatios<T>(node: SectionNode<T>): Record<string, number> {
@@ -196,6 +300,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         hasRightSidebar = false,
         initialSidebarState,
         initialSectionRatios,
+        hideEmptyPanelBar = false,
         renderActivityIcon,
         renderPanelContent,
         renderTabTitle,
@@ -203,6 +308,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onSelectActivity,
         onSidebarStateChange,
         onActiveTabChange,
+        onCloseTab,
         onActivityIconContextMenu,
         onActivityIconDrop,
         onActivityBarBackgroundContextMenu,
@@ -225,6 +331,23 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const [activityBarDragSession, setActivityBarDragSession] = useState<ActivityBarDragSession | null>(null);
     const [panelDragSession, setPanelDragSession] = useState<PanelSectionDragSession | null>(null);
     const [tabDragSession, setTabDragSession] = useState<TabSectionDragSession | null>(null);
+    const livePanelDragSession = panelDragSession && !isEndedPanelSectionDragSession(panelDragSession)
+        ? panelDragSession
+        : null;
+
+    const handlePanelDragSessionChange = useCallback((session: PanelSectionDragSession | null): void => {
+        if (isEndedPanelSectionDragSession(session)) {
+            return;
+        }
+
+        setPanelDragSession(session);
+    }, []);
+
+    useEffect(() => {
+        if (panelDragSession && !livePanelDragSession) {
+            setPanelDragSession(null);
+        }
+    }, [livePanelDragSession, panelDragSession]);
 
     // --- Derived data ---
     const activitiesById = useMemo(
@@ -332,7 +455,64 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         });
     }, [store]);
 
+    const updateTab = useCallback((tabId: string, updates: Partial<WorkbenchTabDefinition>): void => {
+        store.updateState((currentState) => {
+            const sectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
+            if (!sectionId) {
+                return currentState;
+            }
+
+            const section = currentState.tabSections.sections[sectionId];
+            let changed = false;
+            const nextTabs = section.tabs.map((tab) => {
+                if (tab.id !== tabId) {
+                    return tab;
+                }
+
+                const payload = readWorkbenchTabPayload(tab);
+                const nextComponent = updates.component ?? payload.component;
+                const nextParams = updates.params ?? payload.params;
+                const nextTitle = updates.title ?? tab.title;
+
+                if (
+                    nextComponent === payload.component &&
+                    nextParams === payload.params &&
+                    nextTitle === tab.title
+                ) {
+                    return tab;
+                }
+
+                changed = true;
+                return {
+                    ...tab,
+                    title: nextTitle,
+                    payload: {
+                        component: nextComponent,
+                        params: nextParams,
+                    } satisfies WorkbenchTabPayload,
+                    content: `Component: ${nextComponent}`,
+                };
+            });
+
+            if (!changed) {
+                return currentState;
+            }
+
+            return {
+                ...currentState,
+                tabSections: {
+                    sections: {
+                        ...currentState.tabSections.sections,
+                        [sectionId]: { ...section, tabs: nextTabs },
+                    },
+                },
+            };
+        });
+    }, [store]);
+
     const closeTab = useCallback((tabId: string): void => {
+        let didClose = false;
+
         store.updateState((currentState) => {
             const sourceSectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
             if (!sourceSectionId) return currentState;
@@ -341,6 +521,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
             const nextTabs = section.tabs.filter((t) => t.id !== tabId);
             if (nextTabs.length === section.tabs.length) return currentState;
+
+            didClose = true;
 
             const nextFocusedTabId = section.focusedTabId === tabId
                 ? (nextTabs[nextTabs.length - 1]?.id ?? null)
@@ -364,7 +546,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 },
             };
         });
-    }, [store]);
+
+        if (didClose) {
+            onCloseTab?.(tabId);
+        }
+    }, [onCloseTab, store]);
 
     const setActiveTab = useCallback((tabId: string): void => {
         store.updateState((currentState) => {
@@ -382,6 +568,41 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     },
                 },
                 workbench: { activeGroupId: targetSectionId },
+            };
+        });
+    }, [store]);
+
+    const moveWorkbenchTab = useCallback((move: TabSectionTabMove): void => {
+        store.updateState((currentState) => {
+            const sourceSection = currentState.tabSections.sections[move.sourceSectionId];
+            if (!sourceSection) {
+                return currentState;
+            }
+
+            const shouldPreserveLoneSource = (
+                move.sourceSectionId !== move.targetSectionId &&
+                sourceSection.tabs.length === 1
+            );
+            if (shouldPreserveLoneSource) {
+                return currentState;
+            }
+
+            const moved = applyTabWorkbenchTabMove(
+                currentState.root,
+                currentState.tabSections,
+                move,
+                workbenchTabAdapter,
+            );
+
+            return {
+                ...currentState,
+                root: moved.root,
+                tabSections: moved.state,
+                workbench: {
+                    activeGroupId: moved.state.sections[move.targetSectionId]
+                        ? move.targetSectionId
+                        : (Object.keys(moved.state.sections)[0] ?? null),
+                },
             };
         });
     }, [store]);
@@ -405,18 +626,65 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Sync activity bars to store ---
     useEffect(() => {
         const nextBars = buildWorkbenchActivityBars(activities, activeLeftActivityId, activeRightActivityId);
+        // Skip update when bars content is identical to avoid unnecessary re-renders.
+        const currentBars = store.getState().activityBars;
+        if (areActivityBarsEqual(currentBars, nextBars)) return;
         store.resetActivityBars(nextBars);
     }, [activities, activeLeftActivityId, activeRightActivityId, store]);
 
     // --- Sync panel sections to store ---
+    // Panels that have been moved to satellite (non-root) sections via drag-split
+    // must be excluded from the declarative rebuild of root sections. Otherwise
+    // they would be re-added and appear in both root and satellite sections.
     useEffect(() => {
+        const currentState = store.getState();
+        const panelsInSatelliteSections = new Set<string>();
+        const rootSectionIds: ReadonlySet<string> = new Set([
+            WORKBENCH_LEFT_PANEL_SECTION_ID,
+            WORKBENCH_RIGHT_PANEL_SECTION_ID,
+        ]);
+        for (const [sectionId, section] of Object.entries(currentState.panelSections.sections)) {
+            if (!rootSectionIds.has(sectionId)) {
+                for (const panel of section.panels) {
+                    panelsInSatelliteSections.add(panel.id);
+                }
+            }
+        }
+
         const panelSections = buildWorkbenchPanelSections(
             panels, activities,
             activeLeftActivityId, activeRightActivityId,
             activeLeftPanelId, activeRightPanelId,
         );
         for (const section of panelSections) {
-            store.upsertPanelSection(section);
+            let target = section;
+            if (panelsInSatelliteSections.size > 0) {
+                const filteredPanels = section.panels.filter(
+                    (p) => !panelsInSatelliteSections.has(p.id),
+                );
+                if (filteredPanels.length !== section.panels.length) {
+                    target = {
+                        ...section,
+                        panels: filteredPanels,
+                        focusedPanelId: filteredPanels.some((p) => p.id === section.focusedPanelId)
+                            ? section.focusedPanelId
+                            : (filteredPanels[0]?.id ?? null),
+                    };
+                }
+            }
+
+            target = reconcileDeclarativePanelSection(
+                currentState.panelSections.sections[target.id],
+                target,
+            );
+
+            // Skip upsert when the section content is identical to avoid
+            // unnecessary store updates (which always produce new objects).
+            const existing = currentState.panelSections.sections[target.id];
+            if (existing && arePanelSectionsEqual(existing, target)) {
+                continue;
+            }
+            store.upsertPanelSection(target);
         }
     }, [activities, panels, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId, store]);
 
@@ -442,12 +710,14 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     }, [hasRightSidebar, store]);
 
     // --- Notify sidebar state changes ---
+    const onSidebarStateChangeRef = useRef(onSidebarStateChange);
+    onSidebarStateChangeRef.current = onSidebarStateChange;
     useEffect(() => {
-        onSidebarStateChange?.({
+        onSidebarStateChangeRef.current?.({
             left: { visible: leftSidebarVisible, activeActivityId: activeLeftActivityId, activePanelId: activeLeftPanelId },
             right: { visible: rightSidebarVisible, activeActivityId: activeRightActivityId, activePanelId: activeRightPanelId },
         });
-    }, [leftSidebarVisible, rightSidebarVisible, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId, onSidebarStateChange]);
+    }, [leftSidebarVisible, rightSidebarVisible, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId]);
 
     // --- Notify active tab changes ---
     const activeTabSectionId = resolveActiveTabSectionId(state);
@@ -461,15 +731,31 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
     }, [activeTabId, onActiveTabChange]);
 
+    useEffect(() => {
+        const handleWindowKeyDown = (event: KeyboardEvent) => {
+            if (!activeTabId || !isCloseActiveTabShortcut(event)) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            closeTab(activeTabId);
+        };
+
+        window.addEventListener("keydown", handleWindowKeyDown, true);
+        return () => window.removeEventListener("keydown", handleWindowKeyDown, true);
+    }, [activeTabId, closeTab]);
+
     // --- Build panel context ---
     const buildPanelContext = useCallback((hostPanelId: string | null): WorkbenchPanelContext => ({
         activeTabId,
         hostPanelId,
         openTab,
+        updateTab,
         closeTab,
         setActiveTab,
         activatePanel: activatePanelById,
-    }), [activeTabId, openTab, closeTab, setActiveTab, activatePanelById]);
+    }), [activeTabId, openTab, updateTab, closeTab, setActiveTab, activatePanelById]);
 
     // --- Tab DnD preview ---
     const tabPreview = useMemo(
@@ -482,9 +768,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
     // --- Panel DnD preview ---
     const panelPreview = useMemo(
-        () => buildPanelWorkbenchPreviewState(tabPreviewedRoot, state.panelSections, panelDragSession, workbenchPanelAdapter),
+        () => buildPanelWorkbenchPreviewState(tabPreviewedRoot, state.panelSections, livePanelDragSession, workbenchPanelAdapter),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
-        [tabPreviewedRoot, state.panelSections, panelDragSession?.phase, panelDragSession?.hoverTarget],
+        [tabPreviewedRoot, state.panelSections, livePanelDragSession?.phase, livePanelDragSession?.hoverTarget],
     );
     const panelPreviewedRoot = panelPreview?.root ?? tabPreviewedRoot;
     const panelPreviewedSections = panelPreview?.state ?? state.panelSections;
@@ -505,6 +791,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Imperative API ---
     useImperativeHandle(apiRef, () => ({
         openTab,
+        updateTab,
         closeTab,
         setActiveTab,
         activatePanel: activatePanelById,
@@ -528,7 +815,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         },
         setLeftSidebarVisible,
         setRightSidebarVisible,
-    }), [openTab, closeTab, setActiveTab, activatePanelById, store]);
+    }), [openTab, updateTab, closeTab, setActiveTab, activatePanelById, store]);
 
     // --- Component registry ---
     const leftActivityBarState = state.activityBars.bars[WORKBENCH_LEFT_ACTIVITY_BAR_ID] ?? null;
@@ -586,7 +873,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 <ActivityBar
                     bar={leftActivityBarState}
                     dragSession={activityBarDragSession}
-                    panelDragSession={panelDragSession}
+                    panelDragSession={livePanelDragSession}
                     focusBridge={leftActivityFocusBridge}
                     renderIcon={(icon) => {
                         const activity = activitiesById.get(icon.id);
@@ -616,9 +903,26 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                                 panelSections: committed.state,
                             });
                             onActivityIconDrop?.(session.iconId, committed.newPanelSectionId);
+
+                            // Cleanup any panel sections left empty after the drop.
+                            // The host may have populated the new section via onActivityIconDrop;
+                            // if not, the empty section is destroyed and its split merged.
+                            const afterDrop = store.getState();
+                            const cleaned = cleanupEmptyPanelWorkbenchSections(
+                                afterDrop.root,
+                                afterDrop.panelSections,
+                                workbenchPanelAdapter,
+                            );
+                            if (cleaned.root !== afterDrop.root || cleaned.state !== afterDrop.panelSections) {
+                                store.replaceState({
+                                    ...afterDrop,
+                                    root: cleaned.root,
+                                    panelSections: cleaned.state,
+                                });
+                            }
                         }
                     }}
-                    onPanelDragSessionChange={setPanelDragSession}
+                    onPanelDragSessionChange={handlePanelDragSessionChange}
                     onActivateIcon={(iconId) => {
                         const activity = activitiesById.get(iconId);
                         if (activity?.activationMode === "action") {
@@ -643,11 +947,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             const panelSectionProps = binding.props as { panelSectionId: string };
             const panelSection = renderedPanelSections.sections[panelSectionProps.panelSectionId] ?? null;
             const isRight = panelSectionProps.panelSectionId === WORKBENCH_RIGHT_PANEL_SECTION_ID;
-            const isDragging = Boolean(panelDragSession || activityBarDragSession);
+            const isDragging = Boolean(livePanelDragSession || activityBarDragSession);
             const isPreviewLeaf = isPanelWorkbenchPreviewLeaf(section.id, isDragging);
             const committedLeafId = resolvePanelWorkbenchCommittedLeafSectionId(
                 section.id,
-                panelDragSession?.hoverTarget?.anchorLeafSectionId
+                livePanelDragSession?.hoverTarget?.anchorLeafSectionId
                     ?? activityBarDragSession?.contentTarget?.anchorLeafSectionId,
             );
 
@@ -659,7 +963,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     allowContentPreview={isPreviewLeaf}
                     panelSectionId={panelSectionProps.panelSectionId}
                     panelSection={panelSection}
-                    dragSession={panelDragSession}
+                    hideBarWhenEmpty={hideEmptyPanelBar}
+                    dragSession={livePanelDragSession}
                     activityDragSession={activityBarDragSession}
                     focusBridge={isRight ? rightPanelFocusBridge : leftPanelFocusBridge}
                     renderPanelTab={(panel) => (
@@ -673,19 +978,20 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         }
                         return <div style={{ padding: 12 }}>{panel.label}</div>;
                     }}
-                    onDragSessionChange={setPanelDragSession}
+                    onDragSessionChange={handlePanelDragSessionChange}
                     onDragSessionEnd={(session) => {
                         setPanelDragSession(null);
-                        const committed = commitPanelWorkbenchDrop(
-                            store.getState().root,
-                            store.getState().panelSections,
+                        const currentState = store.getState();
+                        const committed = finalizePanelWorkbenchDrop(
+                            currentState.root,
+                            currentState.panelSections,
                             session,
                             workbenchPanelAdapter,
                         );
                         if (!committed) return;
 
                         store.replaceState({
-                            ...store.getState(),
+                            ...currentState,
                             root: committed.root,
                             panelSections: committed.state,
                         });
@@ -727,6 +1033,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     leafSectionId={section.id}
                     tabSectionId={tsProps.tabSectionId}
                     tabSection={tabSection}
+                    trackPointerLifecycle={false}
                     renderTabTitle={(tab) => {
                         if (renderTabTitle) return renderTabTitle(tab);
                         return <span>{tab.title}</span>;
@@ -751,6 +1058,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                                     id: tab.id,
                                     close: () => closeTab(tab.id),
                                     setActive: () => setActiveTab(tab.id),
+                                    setTitle: (title) => updateTab(tab.id, { title }),
                                 }}
                             />
                         );
@@ -775,14 +1083,14 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     }}
                     onFocusTab={setActiveTab}
                     onCloseTab={closeTab}
-                    onMoveTab={(move) => store.moveTab(move)}
+                    onMoveTab={moveWorkbenchTab}
                 />
             );
         },
     }), [
         leftActivityBarState,
         activityBarDragSession,
-        panelDragSession,
+        livePanelDragSession,
         activitiesById,
         renderActivityIcon,
         renderPanelContent,
@@ -796,6 +1104,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         activatePanelById,
         openTab,
         closeTab,
+        moveWorkbenchTab,
         setActiveTab,
         store,
         leftActivityFocusBridge,
@@ -813,6 +1122,27 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 )}
                 onResizeSection={(sectionId, ratio) => store.resizeSection(sectionId, ratio)}
             />
+            <TabSectionDragPreview
+                session={tabDragSession}
+                onSessionChange={setTabDragSession}
+                onSessionEnd={(session) => {
+                    setTabDragSession(null);
+                    const committed = commitTabWorkbenchDrop(
+                        store.getState().root,
+                        store.getState().tabSections,
+                        session,
+                        workbenchTabAdapter,
+                    );
+                    if (!committed) return;
+
+                    store.replaceState({
+                        ...store.getState(),
+                        root: committed.root,
+                        tabSections: committed.state,
+                        workbench: { activeGroupId: committed.activeTabSectionId },
+                    });
+                }}
+            />
             <ActivityBarDragPreview
                 session={activityBarDragSession}
                 bar={leftActivityBarState}
@@ -827,7 +1157,25 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 }}
             />
             <PanelSectionDragPreview
-                session={panelDragSession}
+                session={livePanelDragSession}
+                onSessionChange={handlePanelDragSessionChange}
+                onSessionEnd={(session) => {
+                    setPanelDragSession(null);
+                    const currentState = store.getState();
+                    const committed = finalizePanelWorkbenchDrop(
+                        currentState.root,
+                        currentState.panelSections,
+                        session,
+                        workbenchPanelAdapter,
+                    );
+                    if (!committed) return;
+
+                    store.replaceState({
+                        ...currentState,
+                        root: committed.root,
+                        panelSections: committed.state,
+                    });
+                }}
                 renderTab={(session) => {
                     const activity = activitiesById.get(session.panelId);
                     if (renderActivityIcon && activity) {

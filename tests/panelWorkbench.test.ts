@@ -8,12 +8,19 @@ import {
   createRootSection,
   createSectionComponentBinding,
   createPanelSectionsState,
+  finalizePanelWorkbenchDrop,
   findSectionNode,
+  movePanelSectionPanel,
   splitSectionTree,
+  buildWorkbenchPanelSections,
+  WORKBENCH_LEFT_PANEL_SECTION_ID,
+  WORKBENCH_RIGHT_PANEL_SECTION_ID,
   type SectionComponentData,
   type SectionDraft,
   type PanelSectionDragSession,
   type PanelSectionHoverTarget,
+  type WorkbenchActivityDefinition,
+  type WorkbenchPanelDefinition,
 } from "../src";
 
 interface TestBindingData extends SectionComponentData {
@@ -318,6 +325,29 @@ describe("panelWorkbench helpers", () => {
     expect(commitPanelWorkbenchDrop(root, state, session, adapter)).toBeNull();
   });
 
+  test("single-panel source 在 hover target 未建立前不应预销毁 source section", () => {
+    const root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("panel-section", {
+        panelSectionId: "main-panels",
+      })),
+    );
+
+    const state = createPanelSectionsState([
+      {
+        id: "main-panels",
+        panels: [
+          { id: "terminal", label: "Terminal", symbol: "T", content: "Terminal" },
+        ],
+        focusedPanelId: "terminal",
+        isCollapsed: false,
+      },
+    ]);
+
+    const session = createDragSession({ hoverTarget: null, currentPanelSectionId: "main-panels" });
+
+    expect(buildPanelWorkbenchPreviewState(root, state, session, adapter)).toBeNull();
+  });
+
   test("cleanup 应移除空的非 root panel section 并销毁对应 leaf", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
@@ -439,6 +469,157 @@ describe("panelWorkbench helpers", () => {
     // top-panels had only 1 panel and is root, so it should be kept but empty
     // After cleanup, the empty root stays
     expect(result!.state.sections["top-panels"]?.panels.length).toBe(0);
+  });
+
+  test("finalize 应在 panel bar drop 后回收拖空的 split section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "vertical", {
+      first: createDraft(
+        "root-leaf",
+        "Root",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "root-panels",
+        }),
+      ),
+      second: createDraft(
+        "split-leaf",
+        "Split",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "split-panels",
+        }),
+      ),
+    });
+
+    const state = createPanelSectionsState([
+      {
+        id: "root-panels",
+        panels: [
+          { id: "files", label: "Files", symbol: "F", content: "Files" },
+        ],
+        focusedPanelId: "files",
+        isCollapsed: false,
+        isRoot: true,
+      },
+      {
+        id: "split-panels",
+        panels: [
+          { id: "outline", label: "Outline", symbol: "O", content: "Outline" },
+        ],
+        focusedPanelId: "outline",
+        isCollapsed: false,
+        isRoot: false,
+      },
+    ]);
+
+    const movedState = movePanelSectionPanel(state, {
+      sourceSectionId: "split-panels",
+      targetSectionId: "root-panels",
+      panelId: "outline",
+      targetIndex: 1,
+    });
+
+    const session = createDragSession({
+      sourcePanelSectionId: "split-panels",
+      currentPanelSectionId: "root-panels",
+      currentLeafSectionId: "root-leaf",
+      panelId: "outline",
+      label: "Outline",
+      symbol: "O",
+      content: "Outline",
+      hoverTarget: {
+        area: "bar",
+        leafSectionId: "root-leaf",
+        panelSectionId: "root-panels",
+        targetIndex: 1,
+      },
+    });
+
+    const result = finalizePanelWorkbenchDrop(root, movedState, session, adapter);
+
+    expect(result).not.toBeNull();
+    expect(result!.state.sections["split-panels"]).toBeUndefined();
+    expect(result!.state.sections["root-panels"]?.panels.map((p) => p.id)).toEqual([
+      "files",
+      "outline",
+    ]);
+    expect(result!.root.split).toBeNull();
+  });
+
+  test("finalize 应在 panel bar drop 时兜底应用最后一次 move 并回收 split section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "vertical", {
+      first: createDraft(
+        "root-leaf",
+        "Root",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "root-panels",
+        }),
+      ),
+      second: createDraft(
+        "split-leaf",
+        "Split",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "split-panels",
+        }),
+      ),
+    });
+
+    const state = createPanelSectionsState([
+      {
+        id: "root-panels",
+        panels: [
+          { id: "files", label: "Files", symbol: "F", content: "Files" },
+        ],
+        focusedPanelId: "files",
+        isCollapsed: false,
+        isRoot: true,
+      },
+      {
+        id: "split-panels",
+        panels: [
+          { id: "outline", label: "Outline", symbol: "O", content: "Outline" },
+        ],
+        focusedPanelId: "outline",
+        isCollapsed: false,
+        isRoot: false,
+      },
+    ]);
+
+    const session = createDragSession({
+      sourcePanelSectionId: "split-panels",
+      currentPanelSectionId: "split-panels",
+      currentLeafSectionId: "split-leaf",
+      panelId: "outline",
+      label: "Outline",
+      symbol: "O",
+      content: "Outline",
+      hoverTarget: {
+        area: "bar",
+        leafSectionId: "root-leaf",
+        panelSectionId: "root-panels",
+        targetIndex: 1,
+      },
+    });
+
+    const result = finalizePanelWorkbenchDrop(root, state, session, adapter);
+
+    expect(result).not.toBeNull();
+    expect(result!.state.sections["split-panels"]).toBeUndefined();
+    expect(result!.state.sections["root-panels"]?.panels.map((p) => p.id)).toEqual([
+      "files",
+      "outline",
+    ]);
+    expect(result!.root.split).toBeNull();
   });
 });
 
@@ -610,5 +791,109 @@ describe("activityBarContentDrop helpers", () => {
 
     expect(commitActivityBarContentDrop(root, state, null, adapter)).toBeNull();
     expect(buildActivityBarContentPreviewState(root, state, null, adapter, "")).toBeNull();
+  });
+});
+
+describe("panel drag-split duplication regression", () => {
+  const activities: WorkbenchActivityDefinition[] = [
+    { id: "files", label: "Files", bar: "left", section: "top" },
+    { id: "outline", label: "Outline", bar: "right", section: "top" },
+    { id: "ai-chat", label: "AI Chat", bar: "right", section: "top" },
+  ];
+
+  const panels: WorkbenchPanelDefinition[] = [
+    { id: "files", label: "Files", activityId: "files", position: "left", order: 1 },
+    { id: "outline", label: "Outline", activityId: "outline", position: "right", order: 1 },
+    { id: "backlinks", label: "Backlinks", activityId: "outline", position: "right", order: 2 },
+    { id: "ai-chat", label: "AI Chat", activityId: "ai-chat", position: "right", order: 1 },
+  ];
+
+  test("after panel drag-split, rebuilding root sections should not re-add the moved panel", () => {
+    // Step 1: Build initial panel sections
+    const initialSections = buildWorkbenchPanelSections(
+      panels, activities, "files", null, "files", null,
+    );
+
+    // Verify right panel section has outline, backlinks, and ai-chat
+    const rightSection = initialSections.find(
+      (s) => s.id === WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    )!;
+    expect(rightSection.panels.map((p) => p.id)).toEqual(["outline", "ai-chat", "backlinks"]);
+
+    // Step 2: Simulate a panel drag-split — outline moved to satellite section
+    const postSplitState = createPanelSectionsState([
+      ...initialSections,
+      {
+        id: "satellite-section-1",
+        panels: [
+          { id: "outline", label: "Outline", symbol: "O", content: "Outline pane" },
+        ],
+        focusedPanelId: "outline",
+        isCollapsed: false,
+      },
+    ]);
+
+    // Step 3: Rebuild root sections (as the effect would after icon click)
+    const rebuiltSections = buildWorkbenchPanelSections(
+      panels, activities, "files", null, "files", null,
+    );
+
+    // Step 4: Filter out panels in satellite sections (this is the fix logic)
+    const rootSectionIds = new Set([
+      WORKBENCH_LEFT_PANEL_SECTION_ID,
+      WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    ]);
+    const panelsInSatelliteSections = new Set<string>();
+    for (const [sectionId, section] of Object.entries(postSplitState.sections)) {
+      if (!rootSectionIds.has(sectionId)) {
+        for (const panel of section.panels) {
+          panelsInSatelliteSections.add(panel.id);
+        }
+      }
+    }
+
+    // Verify outline should be excluded from the rebuilt right panel section
+    const rebuiltRight = rebuiltSections.find(
+      (s) => s.id === WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    )!;
+    const filteredPanels = rebuiltRight.panels.filter(
+      (p) => !panelsInSatelliteSections.has(p.id),
+    );
+
+    // Only ai-chat and backlinks should remain (outline is in satellite)
+    expect(filteredPanels.map((p) => p.id)).toEqual(["ai-chat", "backlinks"]);
+    // Outline should NOT appear in the rebuilt right section
+    expect(filteredPanels.some((p) => p.id === "outline")).toBe(false);
+  });
+
+  test("satellite section exclusion should be empty when no drag-splits exist", () => {
+    const initialSections = buildWorkbenchPanelSections(
+      panels, activities, "files", null, "files", null,
+    );
+    const state = createPanelSectionsState(initialSections);
+
+    const rootSectionIds = new Set([
+      WORKBENCH_LEFT_PANEL_SECTION_ID,
+      WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    ]);
+    const panelsInSatelliteSections = new Set<string>();
+    for (const [sectionId, section] of Object.entries(state.sections)) {
+      if (!rootSectionIds.has(sectionId)) {
+        for (const panel of section.panels) {
+          panelsInSatelliteSections.add(panel.id);
+        }
+      }
+    }
+
+    expect(panelsInSatelliteSections.size).toBe(0);
+
+    // Rebuild should produce identical panels with no filtering needed
+    const rebuiltSections = buildWorkbenchPanelSections(
+      panels, activities, "files", null, "files", null,
+    );
+    const rebuiltRight = rebuiltSections.find(
+      (s) => s.id === WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    )!;
+    expect(rebuiltRight.panels.map((p) => p.id)).toEqual(["outline", "ai-chat", "backlinks"]);
   });
 });

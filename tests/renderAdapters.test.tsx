@@ -65,6 +65,30 @@ describe("render adapters", () => {
         expect(panelMarkup).toContain("data-host-panel-content=\"files\"");
         expect(tabMarkup).toContain("data-host-tab-title=\"welcome\"");
     });
+
+    test("应支持在空 panel section 时隐藏 panel bar", () => {
+        const panelMarkup = renderToStaticMarkup(
+            <PanelSection
+                leafSectionId="left"
+                committedLeafSectionId="left"
+                panelSectionId="left-panel"
+                panelSection={{
+                    id: "left-panel",
+                    panels: [],
+                    focusedPanelId: null,
+                    isCollapsed: false,
+                }}
+                hideBarWhenEmpty
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
+            />,
+        );
+
+        expect(panelMarkup).not.toContain("layout-v2-panel-section__bar");
+        expect(panelMarkup).toContain("Drop panel here");
+        expect(panelMarkup).not.toContain("pick one from the bar");
+    });
 });
 
 describe("render adapter registries", () => {

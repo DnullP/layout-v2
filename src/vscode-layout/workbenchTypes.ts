@@ -34,6 +34,8 @@ export interface WorkbenchPanelDefinition {
     id: string;
     /** 显示标签。 */
     label: string;
+    /** 渲染在 sidebar panel rail 上的 icon。 */
+    icon?: ReactNode;
     /** 所属 activity 的 ID。 */
     activityId: string;
     /** 放置在左/右侧边栏。 */
@@ -63,6 +65,7 @@ export interface WorkbenchTabApi {
     id: string;
     close: () => void;
     setActive: () => void;
+    setTitle: (title: string) => void;
 }
 
 /**
@@ -75,6 +78,8 @@ export interface WorkbenchPanelContext {
     hostPanelId: string | null;
     /** 打开一个 tab。 */
     openTab: (tab: WorkbenchTabDefinition) => void;
+    /** 更新一个已存在 tab 的元数据，不改变焦点。 */
+    updateTab: (tabId: string, updates: Partial<WorkbenchTabDefinition>) => void;
     /** 关闭一个 tab。 */
     closeTab: (tabId: string) => void;
     /** 激活一个 tab。 */
@@ -90,6 +95,8 @@ export interface WorkbenchPanelContext {
 export interface WorkbenchApi {
     /** 打开 tab（复用或新增）。 */
     openTab: (tab: WorkbenchTabDefinition) => void;
+    /** 更新已存在 tab 的元数据，不改变焦点。 */
+    updateTab: (tabId: string, updates: Partial<WorkbenchTabDefinition>) => void;
     /** 关闭 tab。 */
     closeTab: (tabId: string) => void;
     /** 设置活跃 tab。 */

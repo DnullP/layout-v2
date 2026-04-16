@@ -18,7 +18,11 @@ import {
   type SectionComponentData,
 } from "./sectionComponent";
 import {
+  closeTabSectionTab,
+  findTabInSectionsState,
   moveTabSectionTab,
+  type TabSectionTabMove,
+  type TabSectionTabDefinition,
   type TabSectionsState,
   type TabSectionStateItem,
 } from "../tab-section/tabSectionModel";
@@ -50,6 +54,11 @@ export interface TabWorkbenchLayoutState<TData extends SectionComponentData> {
 export interface CommitTabWorkbenchResult<TData extends SectionComponentData>
   extends TabWorkbenchLayoutState<TData> {
   activeTabSectionId: string | null;
+}
+
+interface DetachedTabWorkbenchBase<TData extends SectionComponentData>
+  extends TabWorkbenchLayoutState<TData> {
+  detachedTab: TabSectionTabDefinition;
 }
 
 function defaultGetTabSectionId<TData extends SectionComponentData>(
@@ -210,10 +219,6 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
 
       const context = findTabSectionLeafContext(nextRoot, tabSectionId, adapter);
       if (!context) {
-        if (tabSection.isRoot) {
-          continue;
-        }
-
         const nextSections = { ...nextState.sections };
         delete nextSections[tabSectionId];
         nextState = tabSection.isRoot
@@ -223,7 +228,10 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
         break;
       }
 
-      if (tabSection.isRoot) {
+      const canCollapseProtectedRoot = Boolean(
+        tabSection.isRoot && context.parent,
+      );
+      if (tabSection.isRoot && !canCollapseProtectedRoot) {
         continue;
       }
 
@@ -246,6 +254,76 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
     root: nextRoot,
     state: nextState,
   };
+}
+
+export function applyTabWorkbenchTabMove<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  state: TabSectionsState,
+  move: TabSectionTabMove,
+  adapter: TabWorkbenchAdapter<TData>,
+): TabWorkbenchLayoutState<TData> {
+  return cleanupEmptyTabWorkbenchSections(root, moveTabSectionTab(state, move), adapter);
+}
+
+function buildDetachedTabWorkbenchBase<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  state: TabSectionsState,
+  session: TabSectionDragSession,
+  adapter: TabWorkbenchAdapter<TData>,
+): DetachedTabWorkbenchBase<TData> | null {
+  const sourceEntry = findTabInSectionsState(state, session.tabId);
+  if (!sourceEntry || sourceEntry.section.id !== session.sourceTabSectionId || sourceEntry.section.tabs.length !== 1) {
+    return null;
+  }
+
+  const detachedState = closeTabSectionTab(state, session.sourceTabSectionId, session.tabId);
+  const cleaned = cleanupEmptyTabWorkbenchSections(root, detachedState, adapter);
+  return {
+    ...cleaned,
+    detachedTab: sourceEntry.tab,
+  };
+}
+
+function insertTabIntoSection(
+  state: TabSectionsState,
+  targetSectionId: string,
+  tab: TabSectionTabDefinition,
+  targetIndex: number,
+): TabSectionsState {
+  const targetSection = state.sections[targetSectionId];
+  if (!targetSection || targetSection.tabs.some((item) => item.id === tab.id)) {
+    return state;
+  }
+
+  const nextTabs = [...targetSection.tabs];
+  const nextTargetIndex = Math.max(0, Math.min(targetIndex, nextTabs.length));
+  nextTabs.splice(nextTargetIndex, 0, tab);
+
+  return {
+    sections: {
+      ...state.sections,
+      [targetSection.id]: {
+        ...targetSection,
+        tabs: nextTabs,
+        focusedTabId: tab.id,
+      },
+    },
+  };
+}
+
+function resolveTargetTabWorkbenchLeaf<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  target: { anchorLeafSectionId?: string; tabSectionId: string },
+  adapter: TabWorkbenchAdapter<TData>,
+): SectionNode<TData> | null {
+  const anchoredLeaf = target.anchorLeafSectionId
+    ? findSectionNode(root, target.anchorLeafSectionId)
+    : null;
+  if (anchoredLeaf && !anchoredLeaf.split && getTabSectionId(anchoredLeaf, adapter)) {
+    return anchoredLeaf;
+  }
+
+  return findTabSectionLeafContext(root, target.tabSectionId, adapter)?.leaf ?? null;
 }
 
 export function resolveTabWorkbenchSplitPlan(side: TabSectionSplitSide): {
@@ -324,60 +402,46 @@ export function buildTabWorkbenchPreviewState<TData extends SectionComponentData
     return null;
   }
 
+  const detachedBase = buildDetachedTabWorkbenchBase(root, state, session, adapter);
+  const workingRoot = detachedBase?.root ?? root;
+  const workingState = detachedBase?.state ?? state;
+
   if (!session.hoverTarget) {
-    const sourceSection = state.sections[session.currentTabSectionId];
-    if (!sourceSection || sourceSection.tabs.length !== 1) {
-      return null;
-    }
-
-    const nextSourceSection: TabSectionStateItem = {
-      ...sourceSection,
-      tabs: [],
-      focusedTabId: null,
-    };
-
-    return cleanupEmptyTabWorkbenchSections(root, {
-      sections: {
-        ...state.sections,
-        [session.currentTabSectionId]: nextSourceSection,
-      },
-    }, adapter);
+    return detachedBase;
   }
 
   if (session.hoverTarget.area !== "content") {
-    return null;
+    return detachedBase;
   }
 
   if (!session.hoverTarget.splitSide) {
-    if (session.hoverTarget.tabSectionId === session.currentTabSectionId) {
+    if (!detachedBase && session.hoverTarget.tabSectionId === session.currentTabSectionId) {
       return null;
     }
 
-    const targetSection = state.sections[session.hoverTarget.tabSectionId];
+    const targetSection = workingState.sections[session.hoverTarget.tabSectionId];
     if (!targetSection) {
-      return null;
+      return detachedBase;
     }
 
-    const mergedState = moveTabSectionTab(state, {
-      sourceSectionId: session.currentTabSectionId,
-      targetSectionId: session.hoverTarget.tabSectionId,
-      tabId: session.tabId,
-      targetIndex: targetSection.tabs.length,
-    });
+    const mergedState = detachedBase
+      ? insertTabIntoSection(workingState, session.hoverTarget.tabSectionId, detachedBase.detachedTab, targetSection.tabs.length)
+      : moveTabSectionTab(workingState, {
+        sourceSectionId: session.currentTabSectionId,
+        targetSectionId: session.hoverTarget.tabSectionId,
+        tabId: session.tabId,
+        targetIndex: targetSection.tabs.length,
+      });
 
-    return cleanupEmptyTabWorkbenchSections(root, mergedState, adapter);
+    return cleanupEmptyTabWorkbenchSections(workingRoot, mergedState, adapter);
   }
 
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
+  const targetLeaf = resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
   if (!targetLeaf || targetLeaf.split || !getTabSectionId(targetLeaf, adapter)) {
-    return null;
+    return detachedBase;
   }
 
-  const previewIds = createTabWorkbenchPreviewIdentifiers(session.hoverTarget.anchorLeafSectionId);
+  const previewIds = createTabWorkbenchPreviewIdentifiers(targetLeaf.id);
   const splitPlan = resolveTabWorkbenchSplitPlan(session.hoverTarget.splitSide);
   const originalDraft = buildSectionDraftFromLeaf(targetLeaf, previewIds.originalChildSectionId);
   const newDraft = adapter.createTabSectionDraft({
@@ -388,7 +452,7 @@ export function buildTabWorkbenchPreviewState<TData extends SectionComponentData
   });
 
   const previewRoot = splitSectionTree(
-    root,
+    workingRoot,
     targetLeaf.id,
     splitPlan.direction,
     splitPlan.originalAt === "first"
@@ -398,16 +462,18 @@ export function buildTabWorkbenchPreviewState<TData extends SectionComponentData
 
   let previewState: TabSectionsState = {
     sections: {
-      ...state.sections,
+      ...workingState.sections,
       [previewIds.tabSectionId]: createEmptyTabSectionStateItem(previewIds.tabSectionId),
     },
   };
-  previewState = moveTabSectionTab(previewState, {
-    sourceSectionId: session.currentTabSectionId,
-    targetSectionId: previewIds.tabSectionId,
-    tabId: session.tabId,
-    targetIndex: 0,
-  });
+  previewState = detachedBase
+    ? insertTabIntoSection(previewState, previewIds.tabSectionId, detachedBase.detachedTab, 0)
+    : moveTabSectionTab(previewState, {
+      sourceSectionId: session.currentTabSectionId,
+      targetSectionId: previewIds.tabSectionId,
+      tabId: session.tabId,
+      targetIndex: 0,
+    });
 
   return cleanupEmptyTabWorkbenchSections(previewRoot, previewState, adapter);
 }
@@ -418,43 +484,49 @@ export function commitTabWorkbenchDrop<TData extends SectionComponentData>(
   session: TabSectionDragSession | null,
   adapter: TabWorkbenchAdapter<TData>,
 ): CommitTabWorkbenchResult<TData> | null {
-  if (!session || session.phase !== "dragging" || !session.hoverTarget || session.hoverTarget.area !== "content") {
+  if (!session || session.phase !== "dragging" || !session.hoverTarget) {
     return null;
   }
 
+  const detachedBase = buildDetachedTabWorkbenchBase(root, state, session, adapter);
+  const workingRoot = detachedBase?.root ?? root;
+  const workingState = detachedBase?.state ?? state;
+
   if (!session.hoverTarget.splitSide) {
-    if (session.hoverTarget.tabSectionId === session.currentTabSectionId) {
+    if (!detachedBase && session.hoverTarget.tabSectionId === session.currentTabSectionId) {
       return null;
     }
 
-    const targetSection = state.sections[session.hoverTarget.tabSectionId];
+    const targetSection = workingState.sections[session.hoverTarget.tabSectionId];
     if (!targetSection) {
       return null;
     }
 
-    const movedState = moveTabSectionTab(state, {
-      sourceSectionId: session.currentTabSectionId,
-      targetSectionId: session.hoverTarget.tabSectionId,
-      tabId: session.tabId,
-      targetIndex: targetSection.tabs.length,
-    });
-    const cleaned = cleanupEmptyTabWorkbenchSections(root, movedState, adapter);
+    const targetIndex = session.hoverTarget.area === "strip"
+      ? (session.hoverTarget.targetIndex ?? targetSection.tabs.length)
+      : targetSection.tabs.length;
+
+    const movedState = detachedBase
+      ? insertTabIntoSection(workingState, session.hoverTarget.tabSectionId, detachedBase.detachedTab, targetIndex)
+      : moveTabSectionTab(workingState, {
+        sourceSectionId: session.currentTabSectionId,
+        targetSectionId: session.hoverTarget.tabSectionId,
+        tabId: session.tabId,
+        targetIndex,
+      });
+    const cleaned = cleanupEmptyTabWorkbenchSections(workingRoot, movedState, adapter);
     return {
       ...cleaned,
       activeTabSectionId: session.hoverTarget.tabSectionId,
     };
   }
 
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
+  const targetLeaf = resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
   if (!targetLeaf || targetLeaf.split || !getTabSectionId(targetLeaf, adapter)) {
     return null;
   }
 
-  const committedIds = createCommittedTabWorkbenchIdentifiers(root, state, session.hoverTarget.anchorLeafSectionId);
+  const committedIds = createCommittedTabWorkbenchIdentifiers(workingRoot, workingState, targetLeaf.id);
   const splitPlan = resolveTabWorkbenchSplitPlan(session.hoverTarget.splitSide);
   const originalDraft = buildSectionDraftFromLeaf(targetLeaf, committedIds.originalChildSectionId);
   const newDraft = adapter.createTabSectionDraft({
@@ -465,7 +537,7 @@ export function commitTabWorkbenchDrop<TData extends SectionComponentData>(
   });
 
   const committedRoot = splitSectionTree(
-    root,
+    workingRoot,
     targetLeaf.id,
     splitPlan.direction,
     splitPlan.originalAt === "first"
@@ -475,16 +547,18 @@ export function commitTabWorkbenchDrop<TData extends SectionComponentData>(
 
   let committedState: TabSectionsState = {
     sections: {
-      ...state.sections,
+      ...workingState.sections,
       [committedIds.tabSectionId]: createEmptyTabSectionStateItem(committedIds.tabSectionId),
     },
   };
-  committedState = moveTabSectionTab(committedState, {
-    sourceSectionId: session.currentTabSectionId,
-    targetSectionId: committedIds.tabSectionId,
-    tabId: session.tabId,
-    targetIndex: 0,
-  });
+  committedState = detachedBase
+    ? insertTabIntoSection(committedState, committedIds.tabSectionId, detachedBase.detachedTab, 0)
+    : moveTabSectionTab(committedState, {
+      sourceSectionId: session.currentTabSectionId,
+      targetSectionId: committedIds.tabSectionId,
+      tabId: session.tabId,
+      targetIndex: 0,
+    });
 
   const cleaned = cleanupEmptyTabWorkbenchSections(committedRoot, committedState, adapter);
   return {

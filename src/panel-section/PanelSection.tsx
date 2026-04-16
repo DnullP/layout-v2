@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
 import {
     arePreviewHoverTargetsEqual,
@@ -9,6 +9,8 @@ import {
     type PreviewHoverTargetBase,
 } from "../section/previewSession";
 import {
+    createPanelSectionDragSessionId,
+    isEndedPanelSectionDragSession,
     type PanelSectionDragSession,
     type PanelSectionHoverTarget,
     type PanelSectionPointerPressPayload,
@@ -40,12 +42,11 @@ export type PanelSectionContentRenderer = (panel: PanelSectionPanelDefinition) =
 
 const PANEL_BAR_HYSTERESIS_PX = 8;
 
-const DRAG_START_DISTANCE_PX = 4;
-
 function buildPanelSectionDragSession(
     payload: PanelSectionPointerPressPayload,
 ): PanelSectionDragSession {
     return {
+        sessionId: createPanelSectionDragSessionId(),
         sourcePanelSectionId: payload.panelSectionId,
         currentPanelSectionId: payload.panelSectionId,
         sourceLeafSectionId: payload.leafSectionId,
@@ -129,7 +130,6 @@ function getPanelTargetIndexFromPointer(
     return candidateIndex;
 }
 
-
 function getPanelSectionHoverTargetId(target: PreviewHoverTargetBase<"bar" | "content", PanelSectionSplitSide> & { panelSectionId?: string }): string {
     return target.panelSectionId ?? "";
 }
@@ -147,6 +147,7 @@ export function PanelSection(props: {
     committedLeafSectionId: string;
     panelSectionId: string;
     panelSection: PanelSectionStateItem | null;
+    hideBarWhenEmpty?: boolean;
     dragSession?: PanelSectionDragSession | null;
     activityDragSession?: ActivityBarDragSession | null;
     focusBridge?: PanelSectionFocusBridge<PanelSectionStateItem, PanelSectionPanelDefinition>;
@@ -167,6 +168,7 @@ export function PanelSection(props: {
         committedLeafSectionId,
         panelSectionId,
         panelSection,
+        hideBarWhenEmpty = false,
         dragSession: controlledDragSession,
         activityDragSession,
         focusBridge,
@@ -175,7 +177,6 @@ export function PanelSection(props: {
         renderPanelTab,
         renderPanelContent,
         onDragSessionChange,
-        onDragSessionEnd,
         onActivityDragSessionChange,
         onActivatePanel,
         onFocusPanel,
@@ -189,13 +190,19 @@ export function PanelSection(props: {
     const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const previousSlotLeftsRef = useRef<Record<string, number>>({});
     const previousPanelsRef = useRef(panelSection?.panels);
-    const pendingPressRef = useRef<PanelSectionPointerPressPayload | null>(null);
-    const dragSession = controlledDragSession ?? internalDragSession;
-    const dragSessionRef = useRef<PanelSectionDragSession | null>(dragSession);
-    const updateDragSession = onDragSessionChange ?? setInternalDragSession;
-    const updateActivityDragSession = onActivityDragSessionChange ?? (() => { });
+    const rawDragSession = controlledDragSession ?? internalDragSession;
+    const dragSession = rawDragSession && !isEndedPanelSectionDragSession(rawDragSession)
+        ? rawDragSession
+        : null;
+    const setDragSessionState = onDragSessionChange ?? setInternalDragSession;
+    const updateDragSession = useCallback((nextSession: PanelSectionDragSession | null): void => {
+        if (isEndedPanelSectionDragSession(nextSession)) {
+            return;
+        }
 
-    dragSessionRef.current = dragSession;
+        setDragSessionState(nextSession);
+    }, [setDragSessionState]);
+    const updateActivityDragSession = onActivityDragSessionChange ?? (() => { });
 
     if (!panelSection) {
         console.warn("[layout-v2] panel section state is missing", {
@@ -206,6 +213,8 @@ export function PanelSection(props: {
     }
 
     const activePanel = panelSection.panels.find((panel) => panel.id === panelSection.focusedPanelId) ?? null;
+    const hasPanels = panelSection.panels.length > 0;
+    const shouldRenderBar = hasPanels || !hideBarWhenEmpty;
     const draggingPanelId = dragSession?.phase === "dragging" && dragSession.currentPanelSectionId === panelSection.id
         ? dragSession.panelId
         : null;
@@ -217,131 +226,6 @@ export function PanelSection(props: {
         activePanel &&
         activePanel.id === dragSession.panelId,
     );
-
-    // --- Pending press → drag session promotion ---
-    // Pointer press is stored into pendingPressRef without triggering state.
-    // Only after the pointer moves beyond the drag threshold do we create a
-    // drag session, avoiding a full registry-level re-render on simple clicks.
-    useEffect(() => {
-        function handlePendingMove(event: PointerEvent): void {
-            const press = pendingPressRef.current;
-            if (!press || event.pointerId !== press.pointerId) return;
-            const distance = Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY);
-            if (distance >= DRAG_START_DISTANCE_PX) {
-                pendingPressRef.current = null;
-                const session = buildPanelSectionDragSession(press);
-                session.phase = "dragging";
-                session.pointerX = event.clientX;
-                session.pointerY = event.clientY;
-                updateDragSession(session);
-            }
-        }
-        function handlePendingEnd(event: PointerEvent): void {
-            const press = pendingPressRef.current;
-            if (!press || event.pointerId !== press.pointerId) return;
-            pendingPressRef.current = null;
-        }
-
-        window.addEventListener("pointermove", handlePendingMove);
-        window.addEventListener("pointerup", handlePendingEnd);
-        window.addEventListener("pointercancel", handlePendingEnd);
-        return () => {
-            window.removeEventListener("pointermove", handlePendingMove);
-            window.removeEventListener("pointerup", handlePendingEnd);
-            window.removeEventListener("pointercancel", handlePendingEnd);
-        };
-    }, [updateDragSession]);
-
-    useEffect(() => {
-        if (!dragSession || dragSession.sourcePanelSectionId !== panelSection.id) {
-            return;
-        }
-        const currentDragSession: PanelSectionDragSession = dragSession;
-        let pendingEvent: PointerEvent | null = null;
-        let frameId = 0;
-
-        function flushPointerMove(): PanelSectionDragSession | null {
-            frameId = 0;
-            const event = pendingEvent;
-            pendingEvent = null;
-            if (!event) {
-                return dragSessionRef.current;
-            }
-
-            const baseSession = dragSessionRef.current ?? currentDragSession;
-
-            const distance = Math.hypot(
-                event.clientX - baseSession.originX,
-                event.clientY - baseSession.originY,
-            );
-            const nextPhase = baseSession.phase === "pending" && distance >= DRAG_START_DISTANCE_PX
-                ? "dragging"
-                : baseSession.phase;
-
-            if (
-                nextPhase === baseSession.phase &&
-                baseSession.pointerX === event.clientX &&
-                baseSession.pointerY === event.clientY
-            ) {
-                return baseSession;
-            }
-
-            const nextSession: PanelSectionDragSession = {
-                ...baseSession,
-                phase: nextPhase,
-                pointerX: event.clientX,
-                pointerY: event.clientY,
-            };
-            dragSessionRef.current = nextSession;
-            updateDragSession(nextSession);
-            return nextSession;
-        }
-
-        function handlePointerMove(event: PointerEvent): void {
-            const baseSession = dragSessionRef.current ?? currentDragSession;
-            if (event.pointerId !== baseSession.pointerId) {
-                return;
-            }
-
-            pendingEvent = event;
-            if (!frameId) {
-                frameId = window.requestAnimationFrame(flushPointerMove);
-            }
-        }
-
-        function handlePointerEnd(event: PointerEvent): void {
-            const baseSession = dragSessionRef.current ?? currentDragSession;
-            if (event.pointerId !== baseSession.pointerId) {
-                return;
-            }
-
-            let finalSession = dragSessionRef.current ?? currentDragSession;
-            if (frameId) {
-                window.cancelAnimationFrame(frameId);
-                finalSession = flushPointerMove() ?? finalSession;
-            }
-
-            dragSessionRef.current = null;
-            updateDragSession(null);
-
-            if (finalSession?.phase === "dragging") {
-                onDragSessionEnd?.(finalSession);
-            }
-        }
-
-        window.addEventListener("pointermove", handlePointerMove);
-        window.addEventListener("pointerup", handlePointerEnd);
-        window.addEventListener("pointercancel", handlePointerEnd);
-
-        return () => {
-            if (frameId) {
-                window.cancelAnimationFrame(frameId);
-            }
-            window.removeEventListener("pointermove", handlePointerMove);
-            window.removeEventListener("pointerup", handlePointerEnd);
-            window.removeEventListener("pointercancel", handlePointerEnd);
-        };
-    }, [dragSession, onDragSessionEnd, panelSection.id, updateDragSession]);
 
     useEffect(() => {
         const isDragging = dragSession?.phase === "dragging" || activityDragSession?.phase === "dragging";
@@ -368,16 +252,22 @@ export function PanelSection(props: {
                 return;
             }
 
+            // During an active drag, clear ALL transforms so that
+            // getBoundingClientRect() in the hover-detection effect returns
+            // accurate natural positions.  FLIP reorder animations applied
+            // mid-drag cause the animated visual offsets to feed back into
+            // getPanelTargetIndexFromPointer, producing oscillating target
+            // indices that trigger "Maximum update depth exceeded".
+            if (draggingId) {
+                slotElement.style.transition = "none";
+                slotElement.style.transform = "none";
+                nextSlotLefts[panel.id] = slotElement.getBoundingClientRect().left;
+                return;
+            }
+
             const nextLeft = slotElement.getBoundingClientRect().left;
             const previousLeft = previousSlotLeftsRef.current[panel.id];
             nextSlotLefts[panel.id] = nextLeft;
-
-            // Skip animating the panel being dragged (shown as placeholder)
-            if (panel.id === draggingId) {
-                slotElement.style.transition = "none";
-                slotElement.style.transform = "none";
-                return;
-            }
 
             if (!panelsReordered || previousLeft === undefined || previousLeft === nextLeft) {
                 return;
@@ -649,6 +539,8 @@ export function PanelSection(props: {
             ref={rootRef}
             className="layout-v2-panel-section"
             data-panel-section-id={panelSection.id}
+            data-layout-leaf-section-id={leafSectionId}
+            data-layout-committed-leaf-section-id={committedLeafSectionId}
             {...mergeLayoutFocusAttributes(
                 {
                     "data-layout-role": "panel-section",
@@ -657,90 +549,92 @@ export function PanelSection(props: {
                 focusBridge?.getSectionAttributes?.(panelSection),
             )}
         >
-            <div
-                ref={barRef}
-                className={[
-                    "layout-v2-panel-section__bar",
-                    pointerInsideBar || activityPointerInsideBar ? "layout-v2-panel-section__bar--drag-over" : "",
-                ].filter(Boolean).join(" ")}
-            >
-                <div className="layout-v2-panel-section__bar-list">
-                    {panelSection.panels.map((panel, index) => (
-                        <div
-                            key={panel.id}
-                            ref={(element) => {
-                                slotRefs.current[panel.id] = element;
-                            }}
-                            className="layout-v2-panel-section__panel-slot"
-                        >
-                            {activityDropIndex === index ? (
-                                <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
-                            ) : null}
-                            {draggingPanelId === panel.id ? (
-                                <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
-                            ) : (
-                                <button
-                                    type="button"
-                                    {...mergeLayoutFocusAttributes(
-                                        {
-                                            "data-layout-role": "panel",
-                                            "data-layout-panel-section-id": panelSection.id,
-                                            "data-layout-panel-id": panel.id,
-                                        },
-                                        focusBridge?.getPanelAttributes?.(panelSection, panel),
-                                    )}
-                                    className={[
-                                        "layout-v2-panel-section__panel-tab",
-                                        panelSection.focusedPanelId === panel.id ? "layout-v2-panel-section__panel-tab--focused" : "",
-                                    ].filter(Boolean).join(" ")}
-                                    aria-label={panel.label}
-                                    title={panel.label}
-                                    onClick={() => {
-                                        onActivatePanel?.(panel.id);
-                                        if (panel.activationMode !== "action") {
-                                            onFocusPanel(panel.id);
-                                        }
-                                    }}
-                                    onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {
-                                        if (!interactive || event.button !== 0) {
-                                            return;
-                                        }
-
-                                        pendingPressRef.current = {
-                                            leafSectionId,
-                                            panelSectionId: panelSection.id,
-                                            panelId: panel.id,
-                                            index,
-                                            pointerId: event.pointerId,
-                                            clientX: event.clientX,
-                                            clientY: event.clientY,
-                                            label: panel.label,
-                                            symbol: panel.symbol,
-                                            content: panel.content,
-                                            tone: panel.tone,
-                                        };
-                                    }}
-                                >
-                                    {renderPanelTab ? renderPanelTab(panel) : (
-                                        <span className="layout-v2-panel-section__panel-symbol">{panel.symbol}</span>
-                                    )}
-                                </button>
-                            )}
-                        </div>
-                    ))}
-                    {activityDropIndex === panelSection.panels.length ? (
-                        <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
-                    ) : null}
-                </div>
-                <button
-                    type="button"
-                    className="layout-v2-panel-section__toggle"
-                    onClick={onToggleCollapsed}
-                    aria-label={panelSection.isCollapsed ? "Expand pane content" : "Collapse pane content"}
+            {shouldRenderBar ? (
+                <div
+                    ref={barRef}
+                    className={[
+                        "layout-v2-panel-section__bar",
+                        pointerInsideBar || activityPointerInsideBar ? "layout-v2-panel-section__bar--drag-over" : "",
+                    ].filter(Boolean).join(" ")}
                 >
-                    {panelSection.isCollapsed ? "▾" : "▴"}
-                </button>
-            </div>
+                    <div className="layout-v2-panel-section__bar-list">
+                        {panelSection.panels.map((panel, index) => (
+                            <div
+                                key={panel.id}
+                                ref={(element) => {
+                                    slotRefs.current[panel.id] = element;
+                                }}
+                                className="layout-v2-panel-section__panel-slot"
+                            >
+                                {activityDropIndex === index ? (
+                                    <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
+                                ) : null}
+                                {draggingPanelId === panel.id ? (
+                                    <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
+                                ) : (
+                                    <button
+                                        type="button"
+                                        {...mergeLayoutFocusAttributes(
+                                            {
+                                                "data-layout-role": "panel",
+                                                "data-layout-panel-section-id": panelSection.id,
+                                                "data-layout-panel-id": panel.id,
+                                            },
+                                            focusBridge?.getPanelAttributes?.(panelSection, panel),
+                                        )}
+                                        className={[
+                                            "layout-v2-panel-section__panel-tab",
+                                            panelSection.focusedPanelId === panel.id ? "layout-v2-panel-section__panel-tab--focused" : "",
+                                        ].filter(Boolean).join(" ")}
+                                        aria-label={panel.label}
+                                        title={panel.label}
+                                        onClick={() => {
+                                            onActivatePanel?.(panel.id);
+                                            if (panel.activationMode !== "action") {
+                                                onFocusPanel(panel.id);
+                                            }
+                                        }}
+                                        onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {
+                                            if (!interactive || event.button !== 0) {
+                                                return;
+                                            }
+
+                                            updateDragSession(buildPanelSectionDragSession({
+                                                leafSectionId,
+                                                panelSectionId: panelSection.id,
+                                                panelId: panel.id,
+                                                index,
+                                                pointerId: event.pointerId,
+                                                clientX: event.clientX,
+                                                clientY: event.clientY,
+                                                label: panel.label,
+                                                symbol: panel.symbol,
+                                                content: panel.content,
+                                                tone: panel.tone,
+                                            }));
+                                        }}
+                                    >
+                                        {renderPanelTab ? renderPanelTab(panel) : (
+                                            <span className="layout-v2-panel-section__panel-symbol">{panel.symbol}</span>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                        {activityDropIndex === panelSection.panels.length ? (
+                            <div className="layout-v2-panel-section__panel-placeholder" aria-hidden="true" />
+                        ) : null}
+                    </div>
+                    <button
+                        type="button"
+                        className="layout-v2-panel-section__toggle"
+                        onClick={onToggleCollapsed}
+                        aria-label={panelSection.isCollapsed ? "Expand pane content" : "Collapse pane content"}
+                    >
+                        {panelSection.isCollapsed ? "▾" : "▴"}
+                    </button>
+                </div>
+            ) : null}
 
             <div
                 ref={contentRef}
@@ -776,7 +670,7 @@ export function PanelSection(props: {
                         <div
                             className="layout-v2-panel-section__empty-pane"
                             {...(focusBridge?.getEmptyAttributes?.(panelSection) ?? {})}
-                        >Drop panel here or pick one from the bar</div>
+                        >{shouldRenderBar ? "Drop panel here or pick one from the bar" : "Drop panel here"}</div>
                     )}
                 </div>
             </div>

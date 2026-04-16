@@ -196,7 +196,7 @@ export function buildWorkbenchPanelSections(
         tone: "neutral",
         meta: {
             activityId: p.activityId,
-            icon: activitiesById.get(p.activityId)?.icon ?? null,
+            icon: p.icon ?? activitiesById.get(p.activityId)?.icon ?? null,
         },
     });
 

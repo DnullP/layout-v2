@@ -20,6 +20,7 @@
  */
 
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -31,7 +32,10 @@ import {
   type ActivityBarIconRenderer,
   type ActivityBarPointerPressPayload,
 } from "./ActivityBarIcon";
-import { type PanelSectionDragSession } from "../panel-section/panelSectionDrag";
+import {
+  isEndedPanelSectionDragSession,
+  type PanelSectionDragSession,
+} from "../panel-section/panelSectionDrag";
 import { type ActivityBarDragSession } from "./activityBarDrag";
 import {
   type ActivityBarIconMove,
@@ -217,7 +221,17 @@ export function ActivityBar(props: {
   const processedPointerKeyRef = useRef<string | null>(null);
   const dragSession = controlledDragSession ?? internalDragSession;
   const updateDragSession = onDragSessionChange ?? setInternalDragSession;
-  const updatePanelDragSession = onPanelDragSessionChange ?? (() => { });
+  const livePanelDragSession = panelDragSession && !isEndedPanelSectionDragSession(panelDragSession)
+    ? panelDragSession
+    : null;
+  const setPanelDragSessionState = onPanelDragSessionChange ?? (() => { });
+  const updatePanelDragSession = useCallback((nextSession: PanelSectionDragSession | null): void => {
+    if (isEndedPanelSectionDragSession(nextSession)) {
+      return;
+    }
+
+    setPanelDragSessionState(nextSession);
+  }, [setPanelDragSessionState]);
 
   if (!bar) {
     console.warn("[layout-v2] activity bar state is missing");
@@ -228,12 +242,12 @@ export function ActivityBar(props: {
   const draggingIconId = dragSession?.phase === "dragging" && dragSession.currentBarId === activityBar.id
     ? dragSession.iconId
     : null;
-  const draggingPanelId = panelDragSession?.phase === "dragging" && panelDragSession.activityTarget?.barId === activityBar.id
-    ? panelDragSession.panelId
+  const draggingPanelId = livePanelDragSession?.phase === "dragging" && livePanelDragSession.activityTarget?.barId === activityBar.id
+    ? livePanelDragSession.panelId
     : null;
 
   useEffect(() => {
-    const isDragging = dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging";
+    const isDragging = dragSession?.phase === "dragging" || livePanelDragSession?.phase === "dragging";
     document.body.classList.toggle("layout-v2--dragging", isDragging);
 
     return () => {
@@ -241,7 +255,7 @@ export function ActivityBar(props: {
         document.body.classList.remove("layout-v2--dragging");
       }
     };
-  }, [dragSession?.phase, panelDragSession?.phase]);
+  }, [dragSession?.phase, livePanelDragSession?.phase]);
 
   useEffect(() => {
     if (!dragSession || dragSession.sourceBarId !== activityBar.id) {
@@ -284,7 +298,24 @@ export function ActivityBar(props: {
       }
 
       if (currentDragSession.phase === "dragging") {
-        onDragSessionEnd?.(currentDragSession);
+        // Use live pointer position + live DOM rect to detect if the pointer
+        // ended up back inside this activity bar.  The closure-captured
+        // `currentDragSession` may still carry a stale contentTarget / panelTarget
+        // when pointermove and pointerup fire in the same browser frame (before
+        // React re-renders and effects clear the targets).
+        const barRect = rootRef.current?.getBoundingClientRect();
+        const releasedInsideBar = barRect && (
+          event.clientX >= barRect.left &&
+          event.clientX <= barRect.right &&
+          event.clientY >= barRect.top &&
+          event.clientY <= barRect.bottom
+        );
+
+        onDragSessionEnd?.(
+          releasedInsideBar
+            ? { ...currentDragSession, contentTarget: null, panelTarget: null }
+            : currentDragSession,
+        );
       }
 
       updateDragSession(null);
@@ -397,7 +428,7 @@ export function ActivityBar(props: {
   }, [activityBar.icons, activityBar.id, dragSession, onMoveIcon, updateDragSession]);
 
   useEffect(() => {
-    if (!panelDragSession || panelDragSession.phase !== "dragging") {
+    if (!livePanelDragSession || livePanelDragSession.phase !== "dragging") {
       return;
     }
 
@@ -408,16 +439,16 @@ export function ActivityBar(props: {
 
     const barRect = rootElement.getBoundingClientRect();
     const isInside = (
-      panelDragSession.pointerX >= barRect.left &&
-      panelDragSession.pointerX <= barRect.right &&
-      panelDragSession.pointerY >= barRect.top &&
-      panelDragSession.pointerY <= barRect.bottom
+      livePanelDragSession.pointerX >= barRect.left &&
+      livePanelDragSession.pointerX <= barRect.right &&
+      livePanelDragSession.pointerY >= barRect.top &&
+      livePanelDragSession.pointerY <= barRect.bottom
     );
 
     if (!isInside) {
-      if (panelDragSession.activityTarget?.barId === activityBar.id) {
+      if (livePanelDragSession.activityTarget?.barId === activityBar.id) {
         updatePanelDragSession({
-          ...panelDragSession,
+          ...livePanelDragSession,
           activityTarget: null,
         });
       }
@@ -425,37 +456,37 @@ export function ActivityBar(props: {
     }
 
     const targetIndex = getTargetIndexFromPointer(
-      panelDragSession.pointerY,
+      livePanelDragSession.pointerY,
       slotRefs.current,
       activityBar.icons.map((icon) => icon.id),
-      panelDragSession.activityTarget?.barId === activityBar.id
-        ? panelDragSession.activityTarget.targetIndex
+      livePanelDragSession.activityTarget?.barId === activityBar.id
+        ? livePanelDragSession.activityTarget.targetIndex
         : undefined,
     );
 
     if (
-      panelDragSession.activityTarget?.barId === activityBar.id &&
-      panelDragSession.activityTarget.targetIndex === targetIndex
+      livePanelDragSession.activityTarget?.barId === activityBar.id &&
+      livePanelDragSession.activityTarget.targetIndex === targetIndex
     ) {
       return;
     }
 
     updatePanelDragSession({
-      ...panelDragSession,
+      ...livePanelDragSession,
       activityTarget: {
         barId: activityBar.id,
         targetIndex,
       },
     });
-  }, [activityBar.icons, activityBar.id, panelDragSession, updatePanelDragSession]);
+  }, [activityBar.icons, activityBar.id, livePanelDragSession, updatePanelDragSession]);
 
   const isPointerInside = Boolean(
     dragSession?.phase === "dragging" &&
     dragSession.currentBarId === activityBar.id,
   );
   const isPanelPointerInside = Boolean(
-    panelDragSession?.phase === "dragging" &&
-    panelDragSession.activityTarget?.barId === activityBar.id,
+    livePanelDragSession?.phase === "dragging" &&
+    livePanelDragSession.activityTarget?.barId === activityBar.id,
   );
 
   /**
@@ -486,7 +517,7 @@ export function ActivityBar(props: {
       }}
       className={[
         "layout-v2-activity-bar",
-        dragSession?.phase === "dragging" || panelDragSession?.phase === "dragging"
+        dragSession?.phase === "dragging" || livePanelDragSession?.phase === "dragging"
           ? "layout-v2-activity-bar--dragging"
           : "",
         isPointerInside || isPanelPointerInside ? "layout-v2-activity-bar--drag-over" : "",
@@ -511,7 +542,7 @@ export function ActivityBar(props: {
                 slotRefs.current[icon.id] = element;
               }}
             >
-              {isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === index ? (
+              {isPanelPointerInside && livePanelDragSession?.activityTarget?.targetIndex === index ? (
                 <div className="layout-v2-activity-bar__icon-placeholder" aria-hidden="true" />
               ) : null}
               {draggingIconId === icon.id || draggingPanelId === icon.id ? (
@@ -549,7 +580,7 @@ export function ActivityBar(props: {
           className={[
             "layout-v2-activity-bar__tail-drop-target",
             (isPointerInside && dragSession?.phase === "dragging" && dragSession.targetIndex === activityBar.icons.length) ||
-              (isPanelPointerInside && panelDragSession?.activityTarget?.targetIndex === activityBar.icons.length)
+              (isPanelPointerInside && livePanelDragSession?.activityTarget?.targetIndex === activityBar.icons.length)
               ? "layout-v2-activity-bar__tail-drop-target--drag-over"
               : "",
           ]

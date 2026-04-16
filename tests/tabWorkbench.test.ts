@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyTabWorkbenchTabMove,
   buildTabWorkbenchPreviewState,
   cleanupEmptyTabWorkbenchSections,
   commitTabWorkbenchDrop,
@@ -53,6 +54,127 @@ const adapter = {
 };
 
 describe("tabWorkbench helpers", () => {
+  test("单 tab source 在 strip hover 阶段也应先折叠为 detached base preview", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "source-leaf",
+        "Source",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "source-tabs",
+        }),
+      ),
+      second: createDraft(
+        "target-leaf",
+        "Target",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "target-tabs",
+        }),
+      ),
+    });
+
+    const state = createTabSectionsState([
+      {
+        id: "source-tabs",
+        tabs: [{ id: "review", title: "Review Queue", content: "Review card" }],
+        focusedTabId: "review",
+        isRoot: false,
+      },
+      {
+        id: "target-tabs",
+        tabs: [{ id: "outline", title: "Outline", content: "Outline card" }],
+        focusedTabId: "outline",
+        isRoot: true,
+      },
+    ]);
+
+    const session: TabSectionDragSession = {
+      sourceTabSectionId: "source-tabs",
+      currentTabSectionId: "source-tabs",
+      sourceLeafSectionId: "source-leaf",
+      currentLeafSectionId: "source-leaf",
+      tabId: "review",
+      title: "Review Queue",
+      content: "Review card",
+      pointerId: 1,
+      originX: 10,
+      originY: 10,
+      pointerX: 200,
+      pointerY: 24,
+      phase: "dragging",
+      hoverTarget: {
+        area: "strip",
+        leafSectionId: "target-leaf",
+        anchorLeafSectionId: "target-leaf",
+        tabSectionId: "target-tabs",
+        targetIndex: 1,
+      },
+    };
+
+    const preview = buildTabWorkbenchPreviewState(root, state, session, adapter);
+
+    expect(preview).not.toBeNull();
+    expect(preview?.state.sections["source-tabs"]).toBeUndefined();
+    expect(preview?.state.sections["target-tabs"]?.tabs.map((tab) => tab.id)).toEqual(["outline"]);
+    expect(findSectionNode(preview!.root, "source-leaf")).toBeNull();
+  });
+
+  test("strip move 应在右侧 lone source 合并后同步折叠空 source section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "left-leaf",
+        "Left",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "left-tabs",
+        }),
+      ),
+      second: createDraft(
+        "right-leaf",
+        "Right",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "right-tabs",
+        }),
+      ),
+    });
+
+    const state = createTabSectionsState([
+      {
+        id: "left-tabs",
+        tabs: [{ id: "home", title: "Home", content: "Home card" }],
+        focusedTabId: "home",
+        isRoot: true,
+      },
+      {
+        id: "right-tabs",
+        tabs: [{ id: "guide", title: "Guide", content: "Guide card" }],
+        focusedTabId: "guide",
+        isRoot: false,
+      },
+    ]);
+
+    const moved = applyTabWorkbenchTabMove(root, state, {
+      sourceSectionId: "right-tabs",
+      targetSectionId: "left-tabs",
+      tabId: "guide",
+      targetIndex: 1,
+    }, adapter);
+
+    expect(moved.state.sections["right-tabs"]).toBeUndefined();
+    expect(moved.state.sections["left-tabs"]?.tabs.map((tab) => tab.id)).toEqual(["home", "guide"]);
+    expect(findSectionNode(moved.root, "right-leaf")).toBeNull();
+  });
+
   test("preview split 应生成临时 tab section 并折叠空源 section", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
@@ -214,7 +336,7 @@ describe("tabWorkbench helpers", () => {
     expect(newGroup?.id ?? null).toBe(committed?.activeTabSectionId ?? null);
   });
 
-  test("cleanup 不应销毁空 root tab section", () => {
+  test("cleanup 应折叠空 root tab section 并转移 root 标记", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
     );
@@ -255,9 +377,38 @@ describe("tabWorkbench helpers", () => {
 
     const cleaned = cleanupEmptyTabWorkbenchSections(root, state, adapter);
 
+    expect(cleaned.state.sections["main-tabs"]).toBeUndefined();
+    expect(cleaned.state.sections["review-tabs"]?.isRoot).toBe(true);
+    expect(findSectionNode(cleaned.root, "root-tabs-leaf")).toBeNull();
+    expect(cleaned.root.id).toBe("root");
+    expect((cleaned.root.data.component.props as { tabSectionId?: string }).tabSectionId).toBe("review-tabs");
+  });
+
+  test("cleanup 不应销毁无父节点的唯一 root tab section", () => {
+    const root = createRootSection<TestBindingData>(
+      createDraft(
+        "root",
+        "Root Tabs",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "main-tabs",
+        }),
+      ),
+    );
+
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [],
+        focusedTabId: null,
+        isRoot: true,
+      },
+    ]);
+
+    const cleaned = cleanupEmptyTabWorkbenchSections(root, state, adapter);
+
     expect(cleaned.state.sections["main-tabs"]?.isRoot).toBe(true);
     expect(cleaned.state.sections["main-tabs"]?.tabs).toEqual([]);
-    expect(cleaned.state.sections["review-tabs"]?.isRoot).toBe(false);
-    expect(findSectionNode(cleaned.root, "root-tabs-leaf")).not.toBeNull();
+    expect(findSectionNode(cleaned.root, "root")).not.toBeNull();
   });
 });

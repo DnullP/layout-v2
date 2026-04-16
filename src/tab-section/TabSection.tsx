@@ -41,6 +41,7 @@ import {
   type PreviewHoverTargetBase,
 } from "../section/previewSession";
 import {
+  TAB_SECTION_DRAG_START_DISTANCE_PX,
   type TabSectionDragSession,
   type TabSectionHoverTarget,
   type TabSectionPointerPressPayload,
@@ -82,12 +83,6 @@ export type TabSectionContentRendererRegistry = Record<string, TabSectionContent
  * @description 相邻 tab 落点切换时的滞回范围。
  */
 const TAB_STRIP_HYSTERESIS_PX = 8;
-
-/**
- * @constant DRAG_START_DISTANCE_PX
- * @description 从按下进入真正拖拽前需要越过的最小位移。
- */
-const DRAG_START_DISTANCE_PX = 4;
 
 /**
  * @function buildTabSectionDragSession
@@ -274,6 +269,7 @@ export function TabSection(props: {
   focusBridge?: TabSectionFocusBridge<TabSectionStateItem, TabSectionTabDefinition>;
   interactive?: boolean;
   allowContentPreview?: boolean;
+  trackPointerLifecycle?: boolean;
   contentRegistry?: TabSectionContentRendererRegistry;
   renderTabContent?: TabSectionContentRenderer;
   renderTabTitle?: TabSectionTitleRenderer;
@@ -292,6 +288,7 @@ export function TabSection(props: {
     focusBridge,
     interactive: interactiveProp,
     allowContentPreview: allowContentPreviewProp,
+    trackPointerLifecycle = true,
     contentRegistry,
     renderTabContent,
     renderTabTitle,
@@ -335,9 +332,6 @@ export function TabSection(props: {
   }
 
   const activeCard = tabSection.tabs.find((tab) => tab.id === tabSection.focusedTabId) ?? null;
-  const sectionOwnsDraggedTab = Boolean(
-    dragSession && tabSection.tabs.some((tab) => tab.id === dragSession.tabId),
-  );
   const draggingTabId = dragSession?.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
@@ -353,7 +347,7 @@ export function TabSection(props: {
   );
 
   useEffect(() => {
-    if (!dragSession || !sectionOwnsDraggedTab) {
+    if (!trackPointerLifecycle || !dragSession || !tabSection.tabs.some((tab) => tab.id === dragSession.tabId)) {
       return;
     }
     const currentDragSession: TabSectionDragSession = dragSession;
@@ -374,7 +368,7 @@ export function TabSection(props: {
         event.clientX - baseSession.originX,
         event.clientY - baseSession.originY,
       );
-      const nextPhase = baseSession.phase === "pending" && distance >= DRAG_START_DISTANCE_PX
+      const nextPhase = baseSession.phase === "pending" && distance >= TAB_SECTION_DRAG_START_DISTANCE_PX
         ? "dragging"
         : baseSession.phase;
 
@@ -441,7 +435,7 @@ export function TabSection(props: {
       window.removeEventListener("pointerup", handlePointerEnd);
       window.removeEventListener("pointercancel", handlePointerEnd);
     };
-  }, [dragSession, onDragSessionEnd, sectionOwnsDraggedTab, updateDragSession]);
+  }, [dragSession, onDragSessionEnd, tabSection.tabs, trackPointerLifecycle, updateDragSession]);
 
   useEffect(() => {
     document.body.classList.toggle("layout-v2--dragging", dragSession?.phase === "dragging");
