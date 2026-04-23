@@ -378,6 +378,9 @@ export function PanelSection(props: {
                         top: "top",
                         bottom: "bottom",
                     } as const,
+                    {
+                        currentSplitSide: isCurrentSectionContentTarget ? dragSession.hoverTarget?.splitSide ?? null : null,
+                    },
                 ),
                 contentBounds,
             };
@@ -486,6 +489,11 @@ export function PanelSection(props: {
                         top: "top",
                         bottom: "bottom",
                     } as const,
+                    {
+                        currentSplitSide: isCurrentSectionContentTarget
+                            ? activityDragSession.contentTarget?.splitSide ?? null
+                            : null,
+                    },
                 ),
                 contentBounds,
             };

@@ -56,6 +56,46 @@ describe("previewSession", () => {
         expect(resolvePreviewSplitSide(bounds, 150, 175, { top: "top", bottom: "bottom" })).toBe("bottom");
     });
 
+    test("应在 split 阈值附近保留当前命中的 preview split side", () => {
+        const bounds = createBounds();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            150,
+            68,
+            { top: "top", bottom: "bottom" },
+            { currentSplitSide: "top" },
+        )).toBe("top");
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            108,
+            90,
+            { left: "left", right: "right" },
+            { currentSplitSide: "left" },
+        )).toBe("left");
+    });
+
+    test("应在越过滞回范围后释放当前 split side", () => {
+        const bounds = createBounds();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            150,
+            76,
+            { top: "top", bottom: "bottom" },
+            { currentSplitSide: "top" },
+        )).toBeNull();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            116,
+            90,
+            { left: "left", right: "right" },
+            { currentSplitSide: "left" },
+        )).toBeNull();
+    });
+
     test("应支持公共 anchor 解析和 hover target 比较", () => {
         const left: TestHoverTarget = {
             area: "content",

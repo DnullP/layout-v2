@@ -6,6 +6,10 @@ Independent React layout engine extracted from `ofive`.
 
 仓库内保留了一个独立 demo 用于开发和回归验证，但 demo 不属于包的公共 API。
 
+## Documentation
+
+- [Core Concepts](./docs/core-concepts.md): 面向 wiki 的核心概念、要素与机制说明
+
 ## Included
 
 - Section tree model and React controller

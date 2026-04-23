@@ -66,6 +66,34 @@ describe("render adapters", () => {
         expect(tabMarkup).toContain("data-host-tab-title=\"welcome\"");
     });
 
+    test("切换 focusedTabId 时应继续保留非激活 tab 的内容节点", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "welcome", title: "Welcome", content: "Welcome page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).toContain('data-host-tab-content="welcome"');
+        expect(tabMarkup).toContain('data-host-tab-content="guide"');
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--inactive");
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--active");
+    });
+
     test("应支持在空 panel section 时隐藏 panel bar", () => {
         const panelMarkup = renderToStaticMarkup(
             <PanelSection

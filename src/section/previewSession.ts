@@ -35,6 +35,44 @@ type PreviewSplitSideValue<TSplitSides extends PreviewSplitSideMap<string>> = No
     TSplitSides[keyof TSplitSides]
 >;
 
+const DEFAULT_PREVIEW_SPLIT_HYSTERESIS_PX = 10;
+
+function shouldRetainPreviewSplitSide<const TSplitSides extends PreviewSplitSideMap<string>>(
+    rect: DOMRect | PreviewStableBounds,
+    pointerX: number,
+    pointerY: number,
+    splitSides: TSplitSides,
+    currentSplitSide: PreviewSplitSideValue<TSplitSides> | null | undefined,
+    hysteresisPx: number,
+): currentSplitSide is PreviewSplitSideValue<TSplitSides> {
+    if (!currentSplitSide) {
+        return false;
+    }
+
+    const leftThreshold = rect.left + rect.width / 3;
+    const rightThreshold = rect.right - rect.width / 3;
+    const topThreshold = rect.top + rect.height / 3;
+    const bottomThreshold = rect.bottom - rect.height / 3;
+
+    if (splitSides.left === currentSplitSide) {
+        return pointerX <= leftThreshold + hysteresisPx;
+    }
+
+    if (splitSides.right === currentSplitSide) {
+        return pointerX >= rightThreshold - hysteresisPx;
+    }
+
+    if (splitSides.top === currentSplitSide) {
+        return pointerY <= topThreshold + hysteresisPx;
+    }
+
+    if (splitSides.bottom === currentSplitSide) {
+        return pointerY >= bottomThreshold - hysteresisPx;
+    }
+
+    return false;
+}
+
 export function toPreviewStableBounds(rect: DOMRect | null): PreviewStableBounds | null {
     if (!rect) {
         return null;
@@ -119,11 +157,20 @@ export function resolvePreviewSplitSide<const TSplitSides extends PreviewSplitSi
     pointerX: number,
     pointerY: number,
     splitSides: TSplitSides,
+    options: {
+        currentSplitSide?: PreviewSplitSideValue<TSplitSides> | null;
+        hysteresisPx?: number;
+    } = {},
 ): PreviewSplitSideValue<TSplitSides> | null {
     const leftThreshold = rect.left + rect.width / 3;
     const rightThreshold = rect.right - rect.width / 3;
     const topThreshold = rect.top + rect.height / 3;
     const bottomThreshold = rect.bottom - rect.height / 3;
+
+    const hysteresisPx = Math.max(0, options.hysteresisPx ?? DEFAULT_PREVIEW_SPLIT_HYSTERESIS_PX);
+    if (shouldRetainPreviewSplitSide(rect, pointerX, pointerY, splitSides, options.currentSplitSide, hysteresisPx)) {
+        return options.currentSplitSide;
+    }
 
     if (splitSides.left && pointerX <= leftThreshold) {
         return splitSides.left as PreviewSplitSideValue<TSplitSides>;

@@ -345,6 +345,7 @@ export function TabSection(props: {
     activeCard &&
     activeCard.id === dragSession.tabId,
   );
+  const visibleCardId = shouldHideActiveCard ? null : activeCard?.id ?? null;
 
   useEffect(() => {
     if (!trackPointerLifecycle || !dragSession || !tabSection.tabs.some((tab) => tab.id === dragSession.tabId)) {
@@ -589,6 +590,9 @@ export function TabSection(props: {
             top: "top",
             bottom: "bottom",
           } as const,
+          {
+            currentSplitSide: isCurrentSectionContentTarget ? dragSession.hoverTarget?.splitSide ?? null : null,
+          },
         ),
         contentBounds,
       };
@@ -762,13 +766,29 @@ export function TabSection(props: {
           }
         }}
       >
-        {activeCard && !shouldHideActiveCard ? (
-          <div className={["layout-v2-tab-section__card", getCardToneClassName(activeCard.tone)].join(" ")}>
-            <div className="layout-v2-tab-section__card-title">
-              {renderTabTitle ? renderTabTitle(activeCard) : activeCard.title}
-            </div>
-            <div className="layout-v2-tab-section__card-body">{resolveTabCardBody(activeCard, renderTabContent, contentRegistry)}</div>
-          </div>
+        {visibleCardId ? (
+          tabSection.tabs.map((tab) => {
+            const isVisible = tab.id === visibleCardId;
+
+            return (
+              <div
+                key={tab.id}
+                aria-hidden={!isVisible}
+                className={[
+                  "layout-v2-tab-section__card",
+                  getCardToneClassName(tab.tone),
+                  isVisible
+                    ? "layout-v2-tab-section__card--active"
+                    : "layout-v2-tab-section__card--inactive",
+                ].join(" ")}
+              >
+                <div className="layout-v2-tab-section__card-title">
+                  {renderTabTitle ? renderTabTitle(tab) : tab.title}
+                </div>
+                <div className="layout-v2-tab-section__card-body">{resolveTabCardBody(tab, renderTabContent, contentRegistry)}</div>
+              </div>
+            );
+          })
         ) : (
           <div className="layout-v2-tab-section__empty-card">Drop tab or focus another tab</div>
         )}

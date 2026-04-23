@@ -251,6 +251,75 @@ function collectSectionRatios<T>(node: SectionNode<T>): Record<string, number> {
     return ratios;
 }
 
+export function closeWorkbenchTabState(
+    currentState: VSCodeLayoutState<WorkbenchSectionData>,
+    tabId: string,
+): {
+    nextState: VSCodeLayoutState<WorkbenchSectionData>;
+    didClose: boolean;
+} {
+    const sourceSectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
+    if (!sourceSectionId) {
+        return { nextState: currentState, didClose: false };
+    }
+
+    const section = currentState.tabSections.sections[sourceSectionId];
+    if (!section) {
+        return { nextState: currentState, didClose: false };
+    }
+
+    const nextTabs = section.tabs.filter((tab) => tab.id !== tabId);
+    if (nextTabs.length === section.tabs.length) {
+        return { nextState: currentState, didClose: false };
+    }
+
+    const nextFocusedTabId = section.focusedTabId === tabId
+        ? (nextTabs[nextTabs.length - 1]?.id ?? null)
+        : section.focusedTabId;
+    const nextSection = { ...section, tabs: nextTabs, focusedTabId: nextFocusedTabId };
+
+    if (sourceSectionId === WORKBENCH_MAIN_TAB_SECTION_ID && nextTabs.length === 0) {
+        return {
+            didClose: true,
+            nextState: {
+                ...currentState,
+                tabSections: {
+                    sections: {
+                        ...currentState.tabSections.sections,
+                        [sourceSectionId]: nextSection,
+                    },
+                },
+                workbench: {
+                    ...(currentState.workbench ?? {}),
+                    activeGroupId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                },
+            },
+        };
+    }
+
+    const cleaned = cleanupEmptyTabWorkbenchSections(currentState.root, {
+        sections: {
+            ...currentState.tabSections.sections,
+            [sourceSectionId]: nextSection,
+        },
+    }, workbenchTabAdapter);
+
+    return {
+        didClose: true,
+        nextState: {
+            ...currentState,
+            root: cleaned.root,
+            tabSections: cleaned.state,
+            workbench: {
+                ...(currentState.workbench ?? {}),
+                activeGroupId: cleaned.state.sections[sourceSectionId]
+                    ? sourceSectionId
+                    : (Object.keys(cleaned.state.sections)[0] ?? null),
+            },
+        },
+    };
+}
+
 const workbenchTabAdapter: TabWorkbenchAdapter<WorkbenchSectionData> = {
     createTabSectionDraft: (args) => ({
         id: args.nextSectionId,
@@ -514,37 +583,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         let didClose = false;
 
         store.updateState((currentState) => {
-            const sourceSectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
-            if (!sourceSectionId) return currentState;
-            const section = currentState.tabSections.sections[sourceSectionId];
-            if (!section) return currentState;
-
-            const nextTabs = section.tabs.filter((t) => t.id !== tabId);
-            if (nextTabs.length === section.tabs.length) return currentState;
-
-            didClose = true;
-
-            const nextFocusedTabId = section.focusedTabId === tabId
-                ? (nextTabs[nextTabs.length - 1]?.id ?? null)
-                : section.focusedTabId;
-
-            const cleaned = cleanupEmptyTabWorkbenchSections(currentState.root, {
-                sections: {
-                    ...currentState.tabSections.sections,
-                    [sourceSectionId]: { ...section, tabs: nextTabs, focusedTabId: nextFocusedTabId },
-                },
-            }, workbenchTabAdapter);
-
-            return {
-                ...currentState,
-                root: cleaned.root,
-                tabSections: cleaned.state,
-                workbench: {
-                    activeGroupId: cleaned.state.sections[sourceSectionId]
-                        ? sourceSectionId
-                        : (Object.keys(cleaned.state.sections)[0] ?? null),
-                },
-            };
+            const result = closeWorkbenchTabState(currentState, tabId);
+            didClose = result.didClose;
+            return result.nextState;
         });
 
         if (didClose) {
