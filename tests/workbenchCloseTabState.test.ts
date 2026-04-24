@@ -3,6 +3,7 @@ import {
     WORKBENCH_MAIN_TAB_SECTION_ID,
     createWorkbenchLayoutState,
     findSectionNode,
+    isSectionHidden,
 } from "../src";
 import { closeWorkbenchTabState } from "../src/vscode-layout/VSCodeWorkbench";
 
@@ -26,5 +27,20 @@ describe("closeWorkbenchTabState", () => {
         expect(result.nextState.tabSections.sections[WORKBENCH_MAIN_TAB_SECTION_ID]?.tabs).toEqual([]);
         expect(result.nextState.tabSections.sections[WORKBENCH_MAIN_TAB_SECTION_ID]?.focusedTabId).toBeNull();
         expect(result.nextState.workbench?.activeGroupId).toBe(WORKBENCH_MAIN_TAB_SECTION_ID);
+    });
+
+    test("initial sidebar visibility should be reflected in the root layout state", () => {
+        const initialState = createWorkbenchLayoutState({
+            initialSidebarState: {
+                left: {
+                    visible: false,
+                },
+            },
+        });
+
+        const leftSidebar = findSectionNode(initialState.root, "left-sidebar");
+
+        expect(leftSidebar).not.toBeNull();
+        expect(isSectionHidden(leftSidebar!)).toBe(true);
     });
 });

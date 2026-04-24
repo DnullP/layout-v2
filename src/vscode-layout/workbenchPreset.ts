@@ -6,6 +6,7 @@
 
 import {
     createRootSection,
+    setSectionHidden,
     splitSectionTree,
     SECTION_FIXED_SIZE_META_KEY,
     type SectionDraft,
@@ -265,8 +266,8 @@ export interface CreateWorkbenchLayoutOptions {
     initialTabs?: WorkbenchTabDefinition[];
     hasRightSidebar?: boolean;
     initialSidebarState?: {
-        left?: { activeActivityId?: string | null; activePanelId?: string | null };
-        right?: { activeActivityId?: string | null; activePanelId?: string | null };
+        left?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
+        right?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
     };
 }
 
@@ -285,11 +286,18 @@ export function createWorkbenchLayoutState(
     const rightActivityId = initialSidebarState?.right?.activeActivityId ?? null;
     const leftPanelId = initialSidebarState?.left?.activePanelId ?? null;
     const rightPanelId = initialSidebarState?.right?.activePanelId ?? null;
+    const leftSidebarVisible = initialSidebarState?.left?.visible ?? true;
+    const rightSidebarVisible = initialSidebarState?.right?.visible ?? true;
 
     const mainTabs = buildWorkbenchTabs(initialTabs);
+    let root = createWorkbenchRootLayout(hasRightSidebar);
+    root = setSectionHidden(root, "left-sidebar", !leftSidebarVisible);
+    if (hasRightSidebar) {
+        root = setSectionHidden(root, "right-sidebar", !rightSidebarVisible);
+    }
 
     return createVSCodeLayoutState({
-        root: createWorkbenchRootLayout(hasRightSidebar),
+        root,
         activityBars: buildWorkbenchActivityBars(activities, leftActivityId, rightActivityId),
         panelSections: buildWorkbenchPanelSections(panels, activities, leftActivityId, rightActivityId, leftPanelId, rightPanelId),
         tabSections: {

@@ -13,19 +13,23 @@ import { removeActivityBarIcon } from "../../src/activity-bar/activityBarModel";
 import { useActivityBarState } from "../../src/activity-bar/useActivityBarState";
 import { PanelSection } from "../../src/panel-section/PanelSection";
 import { PanelSectionDragPreview } from "../../src/panel-section/PanelSectionDragPreview";
+import {
+    applyPanelSectionCollapsedLayout,
+    focusPanelSectionWithLayout,
+} from "../../src/panel-section/panelSectionLayout";
 import { type PanelSectionDragSession } from "../../src/panel-section/panelSectionDrag";
 import { usePanelSectionState } from "../../src/panel-section/usePanelSectionState";
-import { SectionLayoutView } from "../../src/vscode-layout/SectionLayoutView";
+import { SectionLayoutView } from "../../src/section/SectionLayoutView";
 import {
     SectionComponentHost,
     createSectionComponentRegistry,
     type SectionComponentBinding,
-} from "../../src/vscode-layout/sectionComponent";
+} from "../../src/section/sectionComponent";
 import { TabSection } from "../../src/tab-section/TabSection";
 import { TabSectionDragPreview } from "../../src/tab-section/TabSectionDragPreview";
 import { type TabSectionDragSession } from "../../src/tab-section/tabSectionDrag";
 import { useTabSectionState } from "../../src/tab-section/useTabSectionState";
-import { useSectionLayout } from "../../src/vscode-layout/useSectionLayout";
+import { useSectionLayout } from "../../src/section/useSectionLayout";
 import {
     PREVIEW_SECTION_ID_PREFIX,
     buildActivityToPanelPreviewState,
@@ -136,6 +140,66 @@ export function SectionLayoutViewUsageExample(): ReactNode {
         [activityBars.state, panelDragSession, panelSections.state],
     );
 
+    const setPanelSectionCollapsedWithLayout = (
+        leafSectionId: string,
+        panelSectionId: string,
+        isCollapsed: boolean,
+    ): void => {
+        const next = applyPanelSectionCollapsedLayout(layout.root, panelSections.state, {
+            leafSectionId,
+            panelSectionId,
+            isCollapsed,
+        });
+        layout.resetLayout(next.root);
+        panelSections.resetState(next.state);
+    };
+
+    const focusPanelWithLayout = (
+        leafSectionId: string,
+        panelSectionId: string,
+        panelId: string,
+    ): void => {
+        const next = focusPanelSectionWithLayout(layout.root, panelSections.state, {
+            leafSectionId,
+            panelSectionId,
+            panelId,
+        });
+        layout.resetLayout(next.root);
+        panelSections.resetState(next.state);
+    };
+
+    const handlePanelDragSessionEnd = (session: PanelSectionDragSession): void => {
+        setPanelDragSession(null);
+        if (session.activityTarget) {
+            const panel = findPanelInSectionsState(panelSections.state, session.panelId)?.panel ?? null;
+            const nextActivityBars = buildPanelToActivityPreviewState(
+                activityBars.state,
+                panel,
+                session.activityTarget.barId,
+                session.activityTarget.targetIndex,
+            );
+            if (!nextActivityBars) {
+                return;
+            }
+
+            activityBars.resetState(nextActivityBars);
+            panelSections.resetState(removePanelSectionPanel(panelSections.state, session.currentPanelSectionId, session.panelId));
+            return;
+        }
+
+        if (session.hoverTarget?.area !== "content") {
+            return;
+        }
+
+        const preview = buildPanelPreviewLayoutState(layout.root, panelSections.state, session);
+        if (!preview) {
+            return;
+        }
+
+        layout.resetLayout(preview.root);
+        panelSections.resetState(preview.state);
+    };
+
     const renderedRoot = tabPreview?.root ?? panelPreview?.root ?? activityContentPreview?.root ?? layout.root;
     const renderedActivityBars = panelToActivityPreview ?? activityBars.state;
     const renderedTabSections = tabPreview?.state ?? tabSections.state;
@@ -217,47 +281,21 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                         interactive={!isInteractivePreviewLeaf(section.id, Boolean(panelDragSession || activityDragSession))}
                         allowContentPreview={isInteractivePreviewLeaf(section.id, Boolean(panelDragSession || activityDragSession))}
                         onDragSessionChange={setPanelDragSession}
-                        onDragSessionEnd={(session) => {
-                            setPanelDragSession(null);
-                            if (session.activityTarget) {
-                                const panel = findPanelInSectionsState(panelSections.state, session.panelId)?.panel ?? null;
-                                const nextActivityBars = buildPanelToActivityPreviewState(
-                                    activityBars.state,
-                                    panel,
-                                    session.activityTarget.barId,
-                                    session.activityTarget.targetIndex,
-                                );
-                                if (!nextActivityBars) {
-                                    return;
-                                }
-
-                                activityBars.resetState(nextActivityBars);
-                                panelSections.resetState(removePanelSectionPanel(panelSections.state, session.currentPanelSectionId, session.panelId));
-                                return;
-                            }
-
-                            if (session.hoverTarget?.area !== "content") {
-                                return;
-                            }
-
-                            const preview = buildPanelPreviewLayoutState(layout.root, panelSections.state, session);
-                            if (!preview) {
-                                return;
-                            }
-
-                            layout.resetLayout(preview.root);
-                            panelSections.resetState(preview.state);
-                        }}
+                        onDragSessionEnd={handlePanelDragSessionEnd}
                         onActivityDragSessionChange={setActivityDragSession}
                         onActivatePanel={() => { }}
-                        onFocusPanel={(panelId) => panelSections.focusPanel(panelBinding.props.panelSectionId, panelId)}
+                        onFocusPanel={(panelId) => focusPanelWithLayout(section.id, panelBinding.props.panelSectionId, panelId)}
                         onToggleCollapsed={() => {
                             const current = panelSections.state.sections[panelBinding.props.panelSectionId] ?? null;
                             if (!current) {
                                 return;
                             }
 
-                            panelSections.setCollapsed(panelBinding.props.panelSectionId, !current.isCollapsed);
+                            setPanelSectionCollapsedWithLayout(
+                                section.id,
+                                panelBinding.props.panelSectionId,
+                                !current.isCollapsed,
+                            );
                         }}
                         onMovePanel={(move) => panelSections.movePanel(move)}
                     />
@@ -345,7 +383,11 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                     />
                 )}
             />
-            <PanelSectionDragPreview session={panelDragSession} onSessionChange={setPanelDragSession} />
+            <PanelSectionDragPreview
+                session={panelDragSession}
+                onSessionChange={setPanelDragSession}
+                onSessionEnd={handlePanelDragSessionEnd}
+            />
             <TabSectionDragPreview session={tabDragSession} />
         </div>
     );

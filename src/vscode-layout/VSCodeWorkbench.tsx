@@ -15,7 +15,7 @@ import {
     type ReactNode,
     type Ref,
 } from "react";
-import { setSectionHidden, type SectionNode } from "../section/layoutModel";
+import { findSectionNode, isSectionHidden, setSectionHidden, type SectionNode } from "../section/layoutModel";
 import { createSectionComponentBinding, createSectionComponentRegistry, SectionComponentHost } from "../section/sectionComponent";
 import { SectionLayoutView } from "../section/SectionLayoutView";
 import { ActivityBar } from "../activity-bar/ActivityBar";
@@ -24,6 +24,10 @@ import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
 import { type ActivityBarIconMove } from "../activity-bar/activityBarModel";
 import { PanelSection } from "../panel-section/PanelSection";
 import { PanelSectionDragPreview } from "../panel-section/PanelSectionDragPreview";
+import {
+    applyPanelSectionCollapsedLayout,
+    focusPanelSectionWithLayout,
+} from "../panel-section/panelSectionLayout";
 import {
     isEndedPanelSectionDragSession,
     type PanelSectionDragSession,
@@ -485,8 +489,16 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 initialTabs,
                 hasRightSidebar,
                 initialSidebarState: initialSidebarState ? {
-                    left: { activeActivityId: initialSidebarState.left.activeActivityId, activePanelId: initialSidebarState.left.activePanelId },
-                    right: { activeActivityId: initialSidebarState.right.activeActivityId, activePanelId: initialSidebarState.right.activePanelId },
+                    left: {
+                        visible: initialSidebarState.left.visible,
+                        activeActivityId: initialSidebarState.left.activeActivityId,
+                        activePanelId: initialSidebarState.left.activePanelId,
+                    },
+                    right: {
+                        visible: initialSidebarState.right.visible,
+                        activeActivityId: initialSidebarState.right.activeActivityId,
+                        activePanelId: initialSidebarState.right.activePanelId,
+                    },
                 } : undefined,
             }),
         });
@@ -499,6 +511,13 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     }
     const store = storeRef.current;
     const state = useVSCodeLayoutStoreState(store);
+    const layoutRoot = useMemo(() => {
+        let nextRoot = setSectionHidden(state.root, "left-sidebar", !leftSidebarVisible);
+        if (hasRightSidebar) {
+            nextRoot = setSectionHidden(nextRoot, "right-sidebar", !rightSidebarVisible);
+        }
+        return nextRoot;
+    }, [state.root, hasRightSidebar, leftSidebarVisible, rightSidebarVisible]);
 
     // --- Late-arriving section ratio restoration ---
     // backendConfig loads async, so initialSectionRatios may be undefined on
@@ -699,6 +718,44 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         });
     }, [store]);
 
+    const setPanelSectionCollapsedWithLayout = useCallback((
+        leafSectionId: string,
+        panelSectionId: string,
+        isCollapsed: boolean,
+    ): void => {
+        store.updateState((currentState) => {
+            const next = applyPanelSectionCollapsedLayout(currentState.root, currentState.panelSections, {
+                leafSectionId,
+                panelSectionId,
+                isCollapsed,
+            });
+            return {
+                ...currentState,
+                root: next.root,
+                panelSections: next.state,
+            };
+        });
+    }, [store]);
+
+    const focusPanelWithLayout = useCallback((
+        leafSectionId: string,
+        panelSectionId: string,
+        panelId: string,
+    ): void => {
+        store.updateState((currentState) => {
+            const next = focusPanelSectionWithLayout(currentState.root, currentState.panelSections, {
+                leafSectionId,
+                panelSectionId,
+                panelId,
+            });
+            return {
+                ...currentState,
+                root: next.root,
+                panelSections: next.state,
+            };
+        });
+    }, [store]);
+
     const activatePanelById = useCallback((panelId: string): void => {
         const panelDef = panels.find((p) => p.id === panelId);
         if (!panelDef) return;
@@ -708,12 +765,14 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             // Don't set activeRightActivityId — the right sidebar shows all
             // right-side panels as icons in a single rail (no separate activity bar).
             setActiveRightPanelId(panelId);
+            focusPanelWithLayout("right-sidebar", WORKBENCH_RIGHT_PANEL_SECTION_ID, panelId);
         } else {
             setLeftSidebarVisible(true);
             setActiveLeftActivityId(panelDef.activityId);
             setActiveLeftPanelId(panelId);
+            focusPanelWithLayout("left-sidebar", WORKBENCH_LEFT_PANEL_SECTION_ID, panelId);
         }
-    }, [panels]);
+    }, [focusPanelWithLayout, panels]);
 
     // --- Sync activity bars to store ---
     useEffect(() => {
@@ -782,18 +841,32 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
     // --- Sync sidebar visibility ---
     useEffect(() => {
-        store.updateState((currentState) => ({
-            ...currentState,
-            root: setSectionHidden(currentState.root, "left-sidebar", !leftSidebarVisible),
-        }));
+        store.updateState((currentState) => {
+            const leftSidebar = findSectionNode(currentState.root, "left-sidebar");
+            if (leftSidebar && isSectionHidden(leftSidebar) === !leftSidebarVisible) {
+                return currentState;
+            }
+
+            return {
+                ...currentState,
+                root: setSectionHidden(currentState.root, "left-sidebar", !leftSidebarVisible),
+            };
+        });
     }, [leftSidebarVisible, store]);
 
     useEffect(() => {
         if (!hasRightSidebar) return;
-        store.updateState((currentState) => ({
-            ...currentState,
-            root: setSectionHidden(currentState.root, "right-sidebar", !rightSidebarVisible),
-        }));
+        store.updateState((currentState) => {
+            const rightSidebar = findSectionNode(currentState.root, "right-sidebar");
+            if (rightSidebar && isSectionHidden(rightSidebar) === !rightSidebarVisible) {
+                return currentState;
+            }
+
+            return {
+                ...currentState,
+                root: setSectionHidden(currentState.root, "right-sidebar", !rightSidebarVisible),
+            };
+        });
     }, [hasRightSidebar, rightSidebarVisible, store]);
 
     // --- Sync root layout when sidebar config changes ---
@@ -851,9 +924,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
     // --- Tab DnD preview ---
     const tabPreview = useMemo(
-        () => buildTabWorkbenchPreviewState(state.root, state.tabSections, tabDragSession, workbenchTabAdapter),
+        () => buildTabWorkbenchPreviewState(layoutRoot, state.tabSections, tabDragSession, workbenchTabAdapter),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
-        [state.root, state.tabSections, tabDragSession?.phase, tabDragSession?.hoverTarget],
+        [layoutRoot, state.tabSections, tabDragSession?.phase, tabDragSession?.hoverTarget],
     );
     const tabPreviewedRoot = tabPreview?.root ?? state.root;
     const renderedTabSections = tabPreview?.state ?? state.tabSections;
@@ -1027,6 +1100,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
                         setLeftSidebarVisible(true);
                         setActiveLeftActivityId(iconId);
+                        setPanelSectionCollapsedWithLayout("left-sidebar", WORKBENCH_LEFT_PANEL_SECTION_ID, false);
                         onSelectActivity?.(iconId, "left");
                     }}
                     onMoveIcon={(move: ActivityBarIconMove) => store.moveActivityIcon(move)}
@@ -1091,7 +1165,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     onActivityDragSessionChange={setActivityBarDragSession}
                     onActivatePanel={(panelId) => activatePanelById(panelId)}
                     onFocusPanel={(panelId) => {
-                        store.focusPanel(panelSectionProps.panelSectionId, panelId);
+                        focusPanelWithLayout(section.id, panelSectionProps.panelSectionId, panelId);
                         if (isRight) {
                             setRightSidebarVisible(true);
                             setActiveRightPanelId(panelId);
@@ -1102,7 +1176,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     }}
                     onToggleCollapsed={() => {
                         const current = store.getPanelSection(panelSectionProps.panelSectionId);
-                        store.setPanelCollapsed(panelSectionProps.panelSectionId, !(current?.isCollapsed ?? false));
+                        setPanelSectionCollapsedWithLayout(
+                            section.id,
+                            panelSectionProps.panelSectionId,
+                            !(current?.isCollapsed ?? false),
+                        );
                     }}
                     onMovePanel={(move) => store.movePanel(move)}
                 />

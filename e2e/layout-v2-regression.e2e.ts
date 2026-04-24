@@ -436,6 +436,99 @@ test.describe("layout-v2 regressions", () => {
         expect(leaveTopFrame.paneTitle).toBe("Outline");
     });
 
+    test("panel drag should commit the visible split when released inside the retained top-edge preview band", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const source = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__panel-tab[aria-label="Outline"]');
+        const content = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__content');
+        const sourceBox = await source.boundingBox();
+        const contentBox = await content.boundingBox();
+        if (!sourceBox || !contentBox) {
+            throw new Error("panel drag split-retention bounds missing");
+        }
+
+        const startX = sourceBox.x + sourceBox.width / 2;
+        const startY = sourceBox.y + sourceBox.height / 2;
+        const contentCenterX = contentBox.x + contentBox.width / 2;
+        const topThresholdY = contentBox.y + contentBox.height / 3;
+        const enterTopY = topThresholdY - 14;
+        const retainedTopY = topThresholdY + 8;
+
+        await page.mouse.move(startX, startY);
+        await page.waitForTimeout(20);
+        await page.mouse.down();
+
+        await page.mouse.move(contentCenterX, enterTopY, { steps: 6 });
+        await waitForAnimationFrames(page);
+        const enterTopFrame = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.move(contentCenterX, retainedTopY, { steps: 1 });
+        await waitForAnimationFrames(page);
+        const retainedTopFrame = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.up();
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        const committedPanelTitles = await page.evaluate(() => {
+            return Array.from(document.querySelectorAll<HTMLElement>(".layout-v2-panel-section"))
+                .map((section) => section.querySelector<HTMLElement>(".layout-v2-panel-section__pane-title")?.textContent ?? null)
+                .filter((title): title is string => Boolean(title));
+        });
+
+        expect(enterTopFrame.contentIsDragOver).toBe(true);
+        expect(enterTopFrame.paneTitle).toBe("Problems");
+
+        expect(retainedTopFrame.contentIsDragOver).toBe(true);
+        expect(retainedTopFrame.paneTitle).toBe("Problems");
+
+        expect(committedPanelTitles).toHaveLength(3);
+        expect(committedPanelTitles).toContain("Explorer");
+        expect(committedPanelTitles).toContain("Outline");
+        expect(committedPanelTitles).toContain("Problems");
+    });
+
+    test("collapsing a panel section should reclaim layout space while keeping the panel bar interactive", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const rightPanel = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"]');
+        const mainTabs = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]');
+        const toggle = rightPanel.locator('.layout-v2-panel-section__toggle');
+        const problemsTab = rightPanel.locator('.layout-v2-panel-section__panel-tab[aria-label="Problems"]');
+        const content = rightPanel.locator('.layout-v2-panel-section__content');
+
+        const expandedPanelBox = await rightPanel.boundingBox();
+        const expandedMainBox = await mainTabs.boundingBox();
+        if (!expandedPanelBox || !expandedMainBox) {
+            throw new Error("panel collapse bounds missing");
+        }
+
+        await toggle.click();
+        await waitForAnimationFrames(page, 2);
+
+        const collapsedPanelBox = await rightPanel.boundingBox();
+        const collapsedMainBox = await mainTabs.boundingBox();
+        if (!collapsedPanelBox || !collapsedMainBox) {
+            throw new Error("collapsed panel bounds missing");
+        }
+
+        await expect(content).toHaveClass(/layout-v2-panel-section__content--collapsed/);
+        await expect(problemsTab).toBeVisible();
+        expect(collapsedPanelBox.width).toBeLessThan(expandedPanelBox.width - 80);
+        expect(collapsedMainBox.width).toBeGreaterThan(expandedMainBox.width + 80);
+
+        await problemsTab.click();
+        await waitForAnimationFrames(page, 2);
+
+        const reexpandedPanelBox = await rightPanel.boundingBox();
+        if (!reexpandedPanelBox) {
+            throw new Error("reexpanded panel bounds missing");
+        }
+
+        await expect(content).not.toHaveClass(/layout-v2-panel-section__content--collapsed/);
+        await expect(rightPanel.locator('.layout-v2-panel-section__pane-title')).toHaveText('Problems');
+        expect(reexpandedPanelBox.width).toBeGreaterThan(collapsedPanelBox.width + 80);
+    });
+
     test("dragging the middle section tab to the lower content right edge should create a lower right split", async ({ page }) => {
         await gotoLayoutV2Example(page);
 
@@ -643,9 +736,6 @@ test.describe("layout-v2 regressions", () => {
 
         await dragTabToSectionContentSide(page, TAB_METRICS, "main-tabs", "right");
 
-        const metricsSection = page.locator('.layout-v2-tab-section', {
-            has: page.locator('.layout-v2-tab-section__tab-title', { hasText: TAB_METRICS }),
-        }).first();
         const leftSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
         const leftBounds = await leftSection.locator('.layout-v2-tab-section__content').boundingBox();
         if (!leftBounds) {

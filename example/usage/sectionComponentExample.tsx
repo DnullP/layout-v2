@@ -5,12 +5,12 @@
 
 import { type ReactNode } from "react";
 import { ActivityBarUsageExample } from "./activityBarExample";
-import { findSectionNode } from "../../src/vscode-layout/layoutModel";
+import { findSectionNode } from "../../src/section/layoutModel";
 import {
     SectionComponentHost,
     createSectionComponentRegistry,
     type SectionComponentBinding,
-} from "../../src/vscode-layout/sectionComponent";
+} from "../../src/section/sectionComponent";
 import {
     createSectionTreeExample,
     type SectionTreeExampleData,

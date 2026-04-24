@@ -168,6 +168,9 @@ export function advancePanelSectionDragSessionPointer(
 export function resolvePanelSectionPointerEndHoverTarget(
     pointerX: number,
     pointerY: number,
+    options: {
+        currentHoverTarget?: PanelSectionHoverTarget | null;
+    } = {},
 ): PanelSectionHoverTarget | null {
     const hoveredElement = document.elementFromPoint(pointerX, pointerY);
     const sectionRoot = hoveredElement?.closest(".layout-v2-panel-section");
@@ -218,6 +221,29 @@ export function resolvePanelSectionPointerEndHoverTarget(
         return null;
     }
 
+    const resolvedAnchorLeafSectionId = anchorLeafSectionId ?? leafSectionId;
+    const currentAnchorLeafSectionId = options.currentHoverTarget?.anchorLeafSectionId
+        ?? options.currentHoverTarget?.leafSectionId;
+    const shouldPreferStableContentTarget = Boolean(
+        options.currentHoverTarget?.area === "content"
+        && options.currentHoverTarget.splitSide
+        && currentAnchorLeafSectionId === resolvedAnchorLeafSectionId
+        && isPointerInsidePreviewBounds(
+            options.currentHoverTarget.contentBounds ?? null,
+            pointerX,
+            pointerY,
+        ),
+    );
+
+    if (shouldPreferStableContentTarget) {
+        return options.currentHoverTarget ?? null;
+    }
+
+    const isCurrentSectionContentTarget = Boolean(
+        options.currentHoverTarget?.area === "content"
+        && currentAnchorLeafSectionId === resolvedAnchorLeafSectionId,
+    );
+
     return {
         area: "content",
         leafSectionId,
@@ -231,6 +257,11 @@ export function resolvePanelSectionPointerEndHoverTarget(
                 top: "top",
                 bottom: "bottom",
             } as const,
+            {
+                currentSplitSide: isCurrentSectionContentTarget
+                    ? options.currentHoverTarget?.splitSide ?? null
+                    : null,
+            },
         ),
         contentBounds,
     };

@@ -54,7 +54,13 @@ export function PanelSectionDragPreview(props: {
 
             let finalSession = sessionRef.current ?? currentSession;
 
-            const resolvedHoverTarget = resolvePanelSectionPointerEndHoverTarget(event.clientX, event.clientY);
+            const resolvedHoverTarget = resolvePanelSectionPointerEndHoverTarget(
+                event.clientX,
+                event.clientY,
+                {
+                    currentHoverTarget: finalSession.hoverTarget,
+                },
+            );
             if (resolvedHoverTarget) {
                 finalSession = resolvedHoverTarget.area === "bar"
                     ? {

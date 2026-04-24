@@ -9,12 +9,12 @@ import {
     splitSectionTree,
     updateSectionTree,
     type SectionNode,
-} from "../../src/vscode-layout/layoutModel";
+} from "../../src/section/layoutModel";
 import {
     createSectionComponentBinding,
     type SectionComponentBinding,
     type SectionComponentData,
-} from "../../src/vscode-layout/sectionComponent";
+} from "../../src/section/sectionComponent";
 import {
     createVSCodeLayoutState,
     createVSCodeLayoutStore,
