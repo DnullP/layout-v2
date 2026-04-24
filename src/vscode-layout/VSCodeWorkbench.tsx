@@ -27,6 +27,7 @@ import { PanelSectionDragPreview } from "../panel-section/PanelSectionDragPrevie
 import {
     isEndedPanelSectionDragSession,
     type PanelSectionDragSession,
+    type PanelSectionHoverTarget,
 } from "../panel-section/panelSectionDrag";
 import { TabSection, TabDragSessionContext } from "../tab-section/TabSection";
 import { TabSectionDragPreview } from "../tab-section/TabSectionDragPreview";
@@ -360,6 +361,50 @@ const workbenchPanelAdapter: PanelWorkbenchAdapter<WorkbenchSectionData> = {
     },
 };
 
+function getComparablePanelLeafSectionId(target: PanelSectionHoverTarget | null | undefined): string | null {
+    if (!target) {
+        return null;
+    }
+
+    if (target.area === "content") {
+        return target.anchorLeafSectionId ?? target.leafSectionId;
+    }
+
+    return target.leafSectionId;
+}
+
+function areEquivalentPanelHoverTargets(
+    left: PanelSectionHoverTarget | null | undefined,
+    right: PanelSectionHoverTarget | null | undefined,
+): boolean {
+    return (
+        left?.area === right?.area &&
+        left?.panelSectionId === right?.panelSectionId &&
+        getComparablePanelLeafSectionId(left) === getComparablePanelLeafSectionId(right) &&
+        left?.anchorLeafSectionId === right?.anchorLeafSectionId &&
+        left?.targetIndex === right?.targetIndex &&
+        left?.splitSide === right?.splitSide
+    );
+}
+
+function areEquivalentPanelDragSessions(
+    left: PanelSectionDragSession | null,
+    right: PanelSectionDragSession | null,
+): boolean {
+    return (
+        left?.sessionId === right?.sessionId &&
+        left?.phase === right?.phase &&
+        left?.panelId === right?.panelId &&
+        left?.currentPanelSectionId === right?.currentPanelSectionId &&
+        left?.sourcePanelSectionId === right?.sourcePanelSectionId &&
+        left?.pointerX === right?.pointerX &&
+        left?.pointerY === right?.pointerY &&
+        left?.activityTarget?.barId === right?.activityTarget?.barId &&
+        left?.activityTarget?.targetIndex === right?.activityTarget?.targetIndex &&
+        areEquivalentPanelHoverTargets(left?.hoverTarget, right?.hoverTarget)
+    );
+}
+
 export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const {
         activities = [],
@@ -409,7 +454,13 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             return;
         }
 
-        setPanelDragSession(session);
+        setPanelDragSession((currentSession) => {
+            if (areEquivalentPanelDragSessions(currentSession, session)) {
+                return currentSession;
+            }
+
+            return session;
+        });
     }, []);
 
     useEffect(() => {

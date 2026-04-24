@@ -172,19 +172,21 @@ export function resolvePreviewSplitSide<const TSplitSides extends PreviewSplitSi
         return options.currentSplitSide;
     }
 
-    if (splitSides.left && pointerX <= leftThreshold) {
+    const entryHysteresisPx = options.currentSplitSide ? 0 : hysteresisPx;
+
+    if (splitSides.left && pointerX <= leftThreshold - entryHysteresisPx) {
         return splitSides.left as PreviewSplitSideValue<TSplitSides>;
     }
 
-    if (splitSides.right && pointerX >= rightThreshold) {
+    if (splitSides.right && pointerX >= rightThreshold + entryHysteresisPx) {
         return splitSides.right as PreviewSplitSideValue<TSplitSides>;
     }
 
-    if (splitSides.top && pointerY <= topThreshold) {
+    if (splitSides.top && pointerY <= topThreshold - entryHysteresisPx) {
         return splitSides.top as PreviewSplitSideValue<TSplitSides>;
     }
 
-    if (splitSides.bottom && pointerY >= bottomThreshold) {
+    if (splitSides.bottom && pointerY >= bottomThreshold + entryHysteresisPx) {
         return splitSides.bottom as PreviewSplitSideValue<TSplitSides>;
     }
 

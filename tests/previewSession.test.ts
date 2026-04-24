@@ -76,6 +76,45 @@ describe("previewSession", () => {
         )).toBe("left");
     });
 
+    test("首次进入 split 区域时应越过进入滞回带才触发", () => {
+        const bounds = createBounds();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            150,
+            120,
+            { top: "top", bottom: "bottom" },
+        )).toBeNull();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            150,
+            129,
+            { top: "top", bottom: "bottom" },
+        )).toBeNull();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            150,
+            130,
+            { top: "top", bottom: "bottom" },
+        )).toBe("bottom");
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            100,
+            90,
+            { left: "left", right: "right" },
+        )).toBeNull();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            90,
+            90,
+            { left: "left", right: "right" },
+        )).toBe("left");
+    });
+
     test("应在越过滞回范围后释放当前 split side", () => {
         const bounds = createBounds();
 

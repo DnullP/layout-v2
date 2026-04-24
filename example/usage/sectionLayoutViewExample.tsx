@@ -12,6 +12,7 @@ import { findPanelInSectionsState, removePanelSectionPanel } from "../../src/pan
 import { removeActivityBarIcon } from "../../src/activity-bar/activityBarModel";
 import { useActivityBarState } from "../../src/activity-bar/useActivityBarState";
 import { PanelSection } from "../../src/panel-section/PanelSection";
+import { PanelSectionDragPreview } from "../../src/panel-section/PanelSectionDragPreview";
 import { type PanelSectionDragSession } from "../../src/panel-section/panelSectionDrag";
 import { usePanelSectionState } from "../../src/panel-section/usePanelSectionState";
 import { SectionLayoutView } from "../../src/vscode-layout/SectionLayoutView";
@@ -344,6 +345,7 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                     />
                 )}
             />
+            <PanelSectionDragPreview session={panelDragSession} onSessionChange={setPanelDragSession} />
             <TabSectionDragPreview session={tabDragSession} />
         </div>
     );

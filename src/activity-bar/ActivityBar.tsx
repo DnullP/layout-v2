@@ -218,6 +218,7 @@ export function ActivityBar(props: {
   const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRef = useRef<HTMLDivElement | null>(null);
   const previousSlotTopsRef = useRef<Record<string, number>>({});
+  const previousIconsRef = useRef(bar?.icons);
   const processedPointerKeyRef = useRef<string | null>(null);
   const dragSession = controlledDragSession ?? internalDragSession;
   const updateDragSession = onDragSessionChange ?? setInternalDragSession;
@@ -334,6 +335,9 @@ export function ActivityBar(props: {
 
   useLayoutEffect(() => {
     const nextSlotTops: Record<string, number> = {};
+    const draggingId = draggingIconId ?? draggingPanelId;
+    const iconsReordered = previousIconsRef.current !== activityBar.icons;
+    previousIconsRef.current = activityBar.icons;
 
     activityBar.icons.forEach((icon) => {
       const slotElement = slotRefs.current[icon.id];
@@ -341,11 +345,23 @@ export function ActivityBar(props: {
         return;
       }
 
+      // During an active drag, clear ALL transforms so hover hit-testing reads
+      // the natural slot positions instead of FLIP-shifted visual positions.
+      // Otherwise adjacent target indices can oscillate while the pointer sits
+      // near a boundary, repeatedly calling onMoveIcon and eventually tripping
+      // React's "Maximum update depth exceeded" safeguard.
+      if (draggingId) {
+        slotElement.style.transition = "none";
+        slotElement.style.transform = "none";
+        nextSlotTops[icon.id] = slotElement.getBoundingClientRect().top;
+        return;
+      }
+
       const nextTop = slotElement.getBoundingClientRect().top;
       const previousTop = previousSlotTopsRef.current[icon.id];
       nextSlotTops[icon.id] = nextTop;
 
-      if (previousTop === undefined || previousTop === nextTop) {
+      if (!iconsReordered || previousTop === undefined || previousTop === nextTop) {
         return;
       }
 
@@ -361,7 +377,7 @@ export function ActivityBar(props: {
     });
 
     previousSlotTopsRef.current = nextSlotTops;
-  }, [activityBar.icons, draggingIconId]);
+  }, [activityBar.icons, draggingIconId, draggingPanelId]);
 
   useEffect(() => {
     if (!dragSession || dragSession.phase !== "dragging") {

@@ -25,32 +25,6 @@ export function PanelSectionDragPreview(props: {
         const handleSessionChange: NonNullable<typeof onSessionChange> = onSessionChange;
 
         const currentSession = session;
-        let pendingEvent: PointerEvent | null = null;
-        let frameId = 0;
-
-        function flushPointerMove(): PanelSectionDragSession | null {
-            frameId = 0;
-            const event = pendingEvent;
-            pendingEvent = null;
-            if (!event) {
-                return sessionRef.current;
-            }
-
-            const baseSession = sessionRef.current ?? currentSession;
-            const nextSession = advancePanelSectionDragSessionPointer(
-                baseSession,
-                event.clientX,
-                event.clientY,
-            );
-
-            if (nextSession === baseSession) {
-                return baseSession;
-            }
-
-            sessionRef.current = nextSession;
-            handleSessionChange(nextSession);
-            return nextSession;
-        }
 
         function handlePointerMove(event: PointerEvent): void {
             const baseSession = sessionRef.current ?? currentSession;
@@ -58,10 +32,18 @@ export function PanelSectionDragPreview(props: {
                 return;
             }
 
-            pendingEvent = event;
-            if (!frameId) {
-                frameId = window.requestAnimationFrame(flushPointerMove);
+            const nextSession = advancePanelSectionDragSessionPointer(
+                baseSession,
+                event.clientX,
+                event.clientY,
+            );
+
+            if (nextSession === baseSession) {
+                return;
             }
+
+            sessionRef.current = nextSession;
+            handleSessionChange(nextSession);
         }
 
         function handlePointerEnd(event: PointerEvent): void {
@@ -71,10 +53,6 @@ export function PanelSectionDragPreview(props: {
             }
 
             let finalSession = sessionRef.current ?? currentSession;
-            if (frameId) {
-                window.cancelAnimationFrame(frameId);
-                finalSession = flushPointerMove() ?? finalSession;
-            }
 
             const resolvedHoverTarget = resolvePanelSectionPointerEndHoverTarget(event.clientX, event.clientY);
             if (resolvedHoverTarget) {
@@ -105,9 +83,6 @@ export function PanelSectionDragPreview(props: {
         window.addEventListener("pointercancel", handlePointerEnd);
 
         return () => {
-            if (frameId) {
-                window.cancelAnimationFrame(frameId);
-            }
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerEnd);
             window.removeEventListener("pointercancel", handlePointerEnd);

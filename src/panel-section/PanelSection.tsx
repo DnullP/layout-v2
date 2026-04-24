@@ -41,6 +41,30 @@ export type PanelSectionTabRenderer = (panel: PanelSectionPanelDefinition) => Re
 export type PanelSectionContentRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
 
 const PANEL_BAR_HYSTERESIS_PX = 8;
+const PANEL_BAR_CONTENT_BOUNDARY_HYSTERESIS_PX = 10;
+
+function isPointerInsidePreviewBoundsWithPadding(
+    bounds: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+    } | null,
+    pointerX: number,
+    pointerY: number,
+    paddingPx: number,
+): boolean {
+    if (!bounds) {
+        return false;
+    }
+
+    return (
+        pointerX >= bounds.left - paddingPx &&
+        pointerX <= bounds.right + paddingPx &&
+        pointerY >= bounds.top - paddingPx &&
+        pointerY <= bounds.bottom + paddingPx
+    );
+}
 
 function buildPanelSectionDragSession(
     payload: PanelSectionPointerPressPayload,
@@ -190,10 +214,12 @@ export function PanelSection(props: {
     const slotRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const previousSlotLeftsRef = useRef<Record<string, number>>({});
     const previousPanelsRef = useRef(panelSection?.panels);
+    const hoverTargetClearFrameRef = useRef<number>(0);
     const rawDragSession = controlledDragSession ?? internalDragSession;
     const dragSession = rawDragSession && !isEndedPanelSectionDragSession(rawDragSession)
         ? rawDragSession
         : null;
+    const dragSessionRef = useRef<PanelSectionDragSession | null>(dragSession);
     const setDragSessionState = onDragSessionChange ?? setInternalDragSession;
     const updateDragSession = useCallback((nextSession: PanelSectionDragSession | null): void => {
         if (isEndedPanelSectionDragSession(nextSession)) {
@@ -203,6 +229,8 @@ export function PanelSection(props: {
         setDragSessionState(nextSession);
     }, [setDragSessionState]);
     const updateActivityDragSession = onActivityDragSessionChange ?? (() => { });
+
+    dragSessionRef.current = dragSession;
 
     if (!panelSection) {
         console.warn("[layout-v2] panel section state is missing", {
@@ -221,10 +249,10 @@ export function PanelSection(props: {
     const activityDropIndex = activityDragSession?.panelTarget?.panelSectionId === panelSection.id
         ? activityDragSession.panelTarget.targetIndex
         : null;
-    const shouldHideActivePane = Boolean(
-        dragSession?.phase === "dragging" &&
-        activePanel &&
-        activePanel.id === dragSession.panelId,
+    const canPreviewRetargetContent = Boolean(
+        allowContentPreview &&
+        dragSession &&
+        !panelSection.panels.some((panel) => panel.id === dragSession.panelId),
     );
 
     useEffect(() => {
@@ -286,13 +314,21 @@ export function PanelSection(props: {
         previousSlotLeftsRef.current = nextSlotLefts;
     }, [dragSession?.phase, dragSession?.panelId, panelSection.panels]);
 
-    useEffect(() => {
-        if ((!interactive && !allowContentPreview) || !dragSession || dragSession.phase !== "dragging") {
+    useLayoutEffect(() => {
+        if ((!interactive && !canPreviewRetargetContent) || !dragSession || dragSession.phase !== "dragging") {
+            if (hoverTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+                hoverTargetClearFrameRef.current = 0;
+            }
             return;
         }
 
         const barRect = barRef.current?.getBoundingClientRect() ?? null;
         const contentRect = contentRef.current?.getBoundingClientRect() ?? null;
+        const isCurrentSectionBarTarget = Boolean(
+            dragSession.hoverTarget?.area === "bar" &&
+            dragSession.hoverTarget.panelSectionId === panelSection.id,
+        );
         const isCurrentSectionContentTarget = Boolean(
             dragSession.hoverTarget?.area === "content" &&
             dragSession.hoverTarget.panelSectionId === panelSection.id,
@@ -304,22 +340,49 @@ export function PanelSection(props: {
             pointerX: dragSession.pointerX,
             pointerY: dragSession.pointerY,
         });
-        const insideBar = Boolean(
+        const shouldPreferStableBarTarget = Boolean(
             interactive &&
-            !shouldPreferStableContentTarget &&
+            isCurrentSectionBarTarget &&
             barRect &&
             dragSession.pointerX >= barRect.left &&
             dragSession.pointerX <= barRect.right &&
             dragSession.pointerY >= barRect.top &&
-            dragSession.pointerY <= barRect.bottom,
+            dragSession.pointerY <= barRect.bottom + PANEL_BAR_CONTENT_BOUNDARY_HYSTERESIS_PX,
         );
-        const insideContent = !panelSection.isCollapsed && isPointerInsidePreviewBounds(
-            contentBounds,
-            dragSession.pointerX,
-            dragSession.pointerY,
+        const shouldPreferStableContentBoundary = Boolean(
+            isCurrentSectionContentTarget &&
+            isPointerInsidePreviewBoundsWithPadding(
+                contentBounds,
+                dragSession.pointerX,
+                dragSession.pointerY,
+                PANEL_BAR_CONTENT_BOUNDARY_HYSTERESIS_PX,
+            ),
+        );
+        const stableContentTarget = shouldPreferStableContentTarget || shouldPreferStableContentBoundary;
+        const insideBar = Boolean(
+            interactive &&
+            !stableContentTarget &&
+            (shouldPreferStableBarTarget || (
+                barRect &&
+                dragSession.pointerX >= barRect.left &&
+                dragSession.pointerX <= barRect.right &&
+                dragSession.pointerY >= barRect.top &&
+                dragSession.pointerY <= barRect.bottom
+            )),
+        );
+        const insideContent = !panelSection.isCollapsed && (
+            isPointerInsidePreviewBounds(
+                contentBounds,
+                dragSession.pointerX,
+                dragSession.pointerY,
+            ) || shouldPreferStableContentBoundary
         );
 
         if (insideBar) {
+            if (hoverTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+                hoverTargetClearFrameRef.current = 0;
+            }
             const targetIndex = getPanelTargetIndexFromPointer(
                 dragSession.pointerX,
                 slotRefs.current,
@@ -361,6 +424,10 @@ export function PanelSection(props: {
         }
 
         if (insideContent && contentBounds) {
+            if (hoverTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+                hoverTargetClearFrameRef.current = 0;
+            }
             const nextTarget: PanelSectionHoverTarget = {
                 area: "content",
                 leafSectionId,
@@ -395,16 +462,33 @@ export function PanelSection(props: {
         }
 
         if (dragSession.hoverTarget?.leafSectionId === leafSectionId) {
-            updateDragSession({
-                ...dragSession,
-                hoverTarget: null,
-            });
+            if (!hoverTargetClearFrameRef.current) {
+                hoverTargetClearFrameRef.current = window.requestAnimationFrame(() => {
+                    hoverTargetClearFrameRef.current = 0;
+                    const latestSession = dragSessionRef.current;
+                    if (!latestSession || latestSession.hoverTarget?.leafSectionId !== leafSectionId) {
+                        return;
+                    }
+
+                    updateDragSession({
+                        ...latestSession,
+                        hoverTarget: null,
+                    });
+                });
+            }
         }
+
+        return () => {
+            if (hoverTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
+                hoverTargetClearFrameRef.current = 0;
+            }
+        };
     }, [
+        canPreviewRetargetContent,
         committedLeafSectionId,
         dragSession,
         interactive,
-        allowContentPreview,
         leafSectionId,
         updateDragSession,
         onMovePanel,
@@ -527,7 +611,7 @@ export function PanelSection(props: {
         dragSession.hoverTarget.panelSectionId === panelSection.id,
     );
     const pointerInsideContent = Boolean(
-        (interactive || allowContentPreview) &&
+        (interactive || canPreviewRetargetContent) &&
         dragSession?.phase === "dragging" &&
         dragSession.hoverTarget?.area === "content" &&
         dragSession.hoverTarget.panelSectionId === panelSection.id &&
@@ -661,7 +745,7 @@ export function PanelSection(props: {
                 ].filter(Boolean).join(" ")}
             >
                 <div className="layout-v2-panel-section__content-inner">
-                    {activePanel && !shouldHideActivePane ? (
+                    {activePanel ? (
                         <div className={["layout-v2-panel-section__pane", getPanelToneClassName(activePanel.tone)].join(" ")}>
                             <div
                                 className="layout-v2-panel-section__pane-header"

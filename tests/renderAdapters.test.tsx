@@ -117,6 +117,57 @@ describe("render adapters", () => {
         expect(panelMarkup).toContain("Drop panel here");
         expect(panelMarkup).not.toContain("pick one from the bar");
     });
+
+    test("dragging focused panel over the bar should keep source pane content rendered", () => {
+        const panelMarkup = renderToStaticMarkup(
+            <PanelSection
+                leafSectionId="right-sidebar"
+                committedLeafSectionId="right-sidebar"
+                panelSectionId="right-panel"
+                panelSection={{
+                    id: "right-panel",
+                    panels: [
+                        { id: "ai-chat", label: "AI Chat", symbol: "A", content: "AI content" },
+                        { id: "outline", label: "Outline", symbol: "O", content: "Outline content" },
+                    ],
+                    focusedPanelId: "ai-chat",
+                    isCollapsed: false,
+                }}
+                dragSession={{
+                    sessionId: 1,
+                    sourcePanelSectionId: "right-panel",
+                    currentPanelSectionId: "right-panel",
+                    sourceLeafSectionId: "right-sidebar",
+                    currentLeafSectionId: "right-sidebar",
+                    activityTarget: null,
+                    panelId: "ai-chat",
+                    label: "AI Chat",
+                    symbol: "A",
+                    content: "AI content",
+                    pointerId: 1,
+                    originX: 100,
+                    originY: 50,
+                    pointerX: 140,
+                    pointerY: 90,
+                    phase: "dragging",
+                    hoverTarget: {
+                        area: "bar",
+                        leafSectionId: "right-sidebar",
+                        anchorLeafSectionId: "right-sidebar",
+                        panelSectionId: "right-panel",
+                        targetIndex: 1,
+                    },
+                }}
+                renderPanelContent={(panel) => <div data-host-panel-content={panel.id}>{panel.content}</div>}
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
+            />,
+        );
+
+        expect(panelMarkup).toContain('data-host-panel-content="ai-chat"');
+        expect(panelMarkup).toContain("AI content");
+    });
 });
 
 describe("render adapter registries", () => {

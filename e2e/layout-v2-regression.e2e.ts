@@ -27,6 +27,14 @@ interface LayoutV2SectionSnapshot {
     emptyCardText: string | null;
 }
 
+interface PanelSectionFrameSnapshot {
+    paneCount: number;
+    paneTitle: string | null;
+    placeholders: number;
+    barIsDragOver: boolean;
+    contentIsDragOver: boolean;
+}
+
 /**
  * @function gotoLayoutV2Example
  * @description 打开 layout-v2 示例页并等待初始布局渲染完成。
@@ -36,6 +44,22 @@ async function gotoLayoutV2Example(page: Page): Promise<void> {
     await page.goto(LAYOUT_V2_EXAMPLE_URL);
     await page.locator(".layout-v2-activity-bar__icon").first().waitFor({ state: "visible" });
     await page.locator(".layout-v2-tab-section").first().waitFor({ state: "visible" });
+}
+
+/**
+ * @function waitForAnimationFrames
+ * @description 等待指定数量的浏览器动画帧，用于逐帧观测连续交互的中间状态。
+ * @param page Playwright 页面对象。
+ * @param frameCount 需要等待的动画帧数量。
+ */
+async function waitForAnimationFrames(page: Page, frameCount = 1): Promise<void> {
+    await page.evaluate(async (count) => {
+        for (let index = 0; index < count; index += 1) {
+            await new Promise<void>((resolve) => {
+                requestAnimationFrame(() => resolve());
+            });
+        }
+    }, frameCount);
 }
 
 /**
@@ -114,6 +138,33 @@ async function readTabSections(page: Page): Promise<LayoutV2SectionSnapshot[]> {
             };
         });
     });
+}
+
+/**
+ * @function readPanelSectionFrameSnapshot
+ * @description 读取 panel section 在当前动画帧的公共 DOM 状态，用于验证连续拖拽的 handoff 与内容连续性。
+ * @param page Playwright 页面对象。
+ * @param panelSectionId 目标 panel section id。
+ * @returns 当前帧的 panel section 快照。
+ */
+async function readPanelSectionFrameSnapshot(
+    page: Page,
+    panelSectionId: string,
+): Promise<PanelSectionFrameSnapshot> {
+    return page.evaluate((sectionId) => {
+        const host = document.querySelector<HTMLElement>(`.layout-v2-panel-section[data-panel-section-id="${sectionId}"]`);
+        if (!host) {
+            throw new Error(`readPanelSectionFrameSnapshot: panel section not found: ${sectionId}`);
+        }
+
+        return {
+            paneCount: host.querySelectorAll(".layout-v2-panel-section__pane").length,
+            paneTitle: host.querySelector<HTMLElement>(".layout-v2-panel-section__pane-title")?.textContent ?? null,
+            placeholders: host.querySelectorAll(".layout-v2-panel-section__panel-placeholder").length,
+            barIsDragOver: host.querySelector(".layout-v2-panel-section__bar")?.classList.contains("layout-v2-panel-section__bar--drag-over") ?? false,
+            contentIsDragOver: host.querySelector(".layout-v2-panel-section__content")?.classList.contains("layout-v2-panel-section__content--drag-over") ?? false,
+        };
+    }, panelSectionId);
 }
 
 /**
@@ -275,6 +326,114 @@ test.describe("layout-v2 regressions", () => {
             "Explorer",
         ]);
         await expect(page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]')).toHaveClass(/selected/);
+    });
+
+    test("holding a dragged activity icon near a reorder boundary should not trigger update-depth errors", async ({ page }) => {
+        const pageErrors: string[] = [];
+        const consoleErrors: string[] = [];
+        page.on("pageerror", (error) => {
+            pageErrors.push(error.message);
+        });
+        page.on("console", (message) => {
+            if (message.type() === "error") {
+                consoleErrors.push(message.text());
+            }
+        });
+
+        await gotoLayoutV2Example(page);
+
+        const source = page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]');
+        const target = page.locator('.layout-v2-activity-bar__icon[aria-label="Source Control"]');
+        const targetBox = await target.boundingBox();
+        if (!targetBox) {
+            throw new Error("activity bar target bounds missing");
+        }
+
+        await movePointerWithoutDrop(
+            page,
+            source,
+            targetBox.x + targetBox.width / 2,
+            targetBox.y + targetBox.height + 8,
+        );
+
+        await page.mouse.move(
+            targetBox.x + targetBox.width / 2,
+            targetBox.y + targetBox.height / 2,
+            { steps: 10 },
+        );
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        expect(pageErrors.filter((message) => message.includes("Maximum update depth exceeded"))).toEqual([]);
+        expect(consoleErrors.filter((message) => message.includes("Maximum update depth exceeded"))).toEqual([]);
+
+        await page.mouse.up();
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        await expect(page.locator('.layout-v2-activity-bar__icon')).toHaveCount(3);
+        await expect(page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]')).toBeVisible();
+        await expect(page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]')).toHaveClass(/selected/);
+    });
+
+    test("panel drag should hand off from bar to content on the first top-edge frame without blanking the pane", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const source = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__panel-tab[aria-label="Outline"]');
+        const content = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__content');
+        const sourceBox = await source.boundingBox();
+        const contentBox = await content.boundingBox();
+        if (!sourceBox || !contentBox) {
+            throw new Error("panel drag continuity bounds missing");
+        }
+
+        const startX = sourceBox.x + sourceBox.width / 2;
+        const startY = sourceBox.y + sourceBox.height / 2;
+        const barY = startY + 12;
+        const topEdgeX = contentBox.x + contentBox.width / 2;
+        const topEdgeY = contentBox.y + 16;
+        const middleY = contentBox.y + contentBox.height / 2;
+
+        await page.mouse.move(startX, startY);
+        await page.waitForTimeout(20);
+        await page.mouse.down();
+        await waitForAnimationFrames(page);
+        const afterDown = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.move(startX, barY, { steps: 2 });
+        await waitForAnimationFrames(page);
+        const barFrame = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.move(topEdgeX, topEdgeY, { steps: 1 });
+        await waitForAnimationFrames(page);
+        const topFrame = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.move(topEdgeX, middleY, { steps: 1 });
+        await waitForAnimationFrames(page);
+        const leaveTopFrame = await readPanelSectionFrameSnapshot(page, "right-panel");
+
+        await page.mouse.up();
+        await waitForAnimationFrames(page, 2);
+
+        expect(afterDown.paneCount).toBe(1);
+        expect(afterDown.barIsDragOver).toBe(false);
+        expect(afterDown.contentIsDragOver).toBe(false);
+
+        expect(barFrame.barIsDragOver).toBe(true);
+        expect(barFrame.contentIsDragOver).toBe(false);
+        expect(barFrame.placeholders).toBe(1);
+        expect(barFrame.paneCount).toBe(1);
+        expect(barFrame.paneTitle).toBe("Outline");
+
+        expect(topFrame.barIsDragOver).toBe(false);
+        expect(topFrame.contentIsDragOver).toBe(true);
+        expect(topFrame.placeholders).toBe(0);
+        expect(topFrame.paneCount).toBe(1);
+        expect(topFrame.paneTitle).toBe("Problems");
+
+        expect(leaveTopFrame.barIsDragOver).toBe(false);
+        expect(leaveTopFrame.contentIsDragOver).toBe(false);
+        expect(leaveTopFrame.placeholders).toBe(1);
+        expect(leaveTopFrame.paneCount).toBe(1);
+        expect(leaveTopFrame.paneTitle).toBe("Outline");
     });
 
     test("dragging the middle section tab to the lower content right edge should create a lower right split", async ({ page }) => {
