@@ -19,8 +19,11 @@ import {
 } from "./sectionComponent";
 import {
   findPanelInSectionsState,
+  insertPanelSectionPanel,
+  removePanelSectionPanel,
   movePanelSectionPanel,
   type PanelSectionsState,
+  type PanelSectionPanelDefinition,
   type PanelSectionStateItem,
 } from "../panel-section/panelSectionModel";
 import {
@@ -57,6 +60,11 @@ export interface CommitPanelWorkbenchResult<TData extends SectionComponentData>
 export interface FinalizePanelWorkbenchResult<TData extends SectionComponentData>
   extends PanelWorkbenchLayoutState<TData> {
   activePanelSectionId: string | null;
+}
+
+interface DetachedPanelWorkbenchBase<TData extends SectionComponentData>
+  extends PanelWorkbenchLayoutState<TData> {
+  detachedPanel: PanelSectionPanelDefinition;
 }
 
 function defaultGetPanelSectionId<TData extends SectionComponentData>(
@@ -299,6 +307,65 @@ function createCommittedPanelWorkbenchIdentifiers<TData extends SectionComponent
   };
 }
 
+function findPanelSectionLeaf<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  panelSectionId: string,
+  adapter: PanelWorkbenchAdapter<TData>,
+): SectionNode<TData> | null {
+  const queue: SectionNode<TData>[] = [root];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    if (!current.split && getPanelSectionId(current, adapter) === panelSectionId) {
+      return current;
+    }
+
+    if (current.split) {
+      queue.push(current.split.children[0], current.split.children[1]);
+    }
+  }
+
+  return null;
+}
+
+function resolvePanelWorkbenchContentTargetLeaf<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  hoverTarget: PanelSectionHoverTarget,
+  adapter: PanelWorkbenchAdapter<TData>,
+): SectionNode<TData> | null {
+  if (hoverTarget.anchorLeafSectionId) {
+    const anchorLeaf = findSectionNode(root, hoverTarget.anchorLeafSectionId);
+    if (anchorLeaf && !anchorLeaf.split && getPanelSectionId(anchorLeaf, adapter)) {
+      return anchorLeaf;
+    }
+  }
+
+  return findPanelSectionLeaf(root, hoverTarget.panelSectionId, adapter);
+}
+
+function buildDetachedPanelWorkbenchBase<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  state: PanelSectionsState,
+  session: PanelSectionDragSession,
+  adapter: PanelWorkbenchAdapter<TData>,
+): DetachedPanelWorkbenchBase<TData> | null {
+  const sourceEntry = findPanelInSectionsState(state, session.panelId);
+  if (!sourceEntry || sourceEntry.section.id !== session.sourcePanelSectionId || sourceEntry.section.panels.length !== 1) {
+    return null;
+  }
+
+  const detachedState = removePanelSectionPanel(state, session.sourcePanelSectionId, session.panelId);
+  const cleaned = cleanupEmptyPanelWorkbenchSections(root, detachedState, adapter);
+  return {
+    ...cleaned,
+    detachedPanel: sourceEntry.panel,
+  };
+}
+
 export function buildPanelWorkbenchPreviewState<TData extends SectionComponentData>(
   root: SectionNode<TData>,
   state: PanelSectionsState,
@@ -309,48 +376,53 @@ export function buildPanelWorkbenchPreviewState<TData extends SectionComponentDa
     return null;
   }
 
+  const detachedBase = buildDetachedPanelWorkbenchBase(root, state, session, adapter);
+  const workingRoot = detachedBase?.root ?? root;
+  const workingState = detachedBase?.state ?? state;
+
   if (!session.hoverTarget) {
-    // Panel drag pointer lifecycle currently lives in the source PanelSection.
-    // Keep the source section mounted until a concrete hover target exists,
-    // otherwise the source component unmounts mid-drag and loses pointermove/up.
-    return null;
+    return detachedBase;
   }
 
   if (session.hoverTarget.area !== "content") {
-    return null;
+    return detachedBase;
   }
 
   if (!session.hoverTarget.splitSide) {
     // Cross-section move without split (dropped inside content without a split indicator).
-    if (session.hoverTarget.panelSectionId === session.currentPanelSectionId) {
+    if (!detachedBase && session.hoverTarget.panelSectionId === session.currentPanelSectionId) {
       return null;
     }
 
-    const targetSection = state.sections[session.hoverTarget.panelSectionId];
+    const targetSection = workingState.sections[session.hoverTarget.panelSectionId];
     if (!targetSection) {
-      return null;
+      return detachedBase;
     }
 
-    const mergedState = movePanelSectionPanel(state, {
-      sourceSectionId: session.currentPanelSectionId,
-      targetSectionId: session.hoverTarget.panelSectionId,
-      panelId: session.panelId,
-      targetIndex: targetSection.panels.length,
-    });
+    const mergedState = detachedBase
+      ? insertPanelSectionPanel(workingState, session.hoverTarget.panelSectionId, detachedBase.detachedPanel, targetSection.panels.length)
+      : movePanelSectionPanel(workingState, {
+        sourceSectionId: session.currentPanelSectionId,
+        targetSectionId: session.hoverTarget.panelSectionId,
+        panelId: session.panelId,
+        targetIndex: targetSection.panels.length,
+      });
 
-    return cleanupEmptyPanelWorkbenchSections(root, mergedState, adapter);
+    return cleanupEmptyPanelWorkbenchSections(workingRoot, mergedState, adapter);
   }
 
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
+  const targetLeaf = resolvePanelWorkbenchContentTargetLeaf(
+    workingRoot,
+    session.hoverTarget,
+    adapter,
+  );
   if (!targetLeaf || targetLeaf.split || !getPanelSectionId(targetLeaf, adapter)) {
-    return null;
+    return detachedBase;
   }
 
-  const previewIds = createPanelWorkbenchPreviewIdentifiers(session.hoverTarget.anchorLeafSectionId);
+  const previewIds = createPanelWorkbenchPreviewIdentifiers(
+    session.hoverTarget.anchorLeafSectionId ?? targetLeaf.id,
+  );
   const splitPlan = resolvePanelWorkbenchSplitPlan(session.hoverTarget.splitSide);
   const originalDraft = buildSectionDraftFromLeaf(targetLeaf, previewIds.originalChildSectionId);
   const newDraft = adapter.createPanelSectionDraft({
@@ -361,7 +433,7 @@ export function buildPanelWorkbenchPreviewState<TData extends SectionComponentDa
   });
 
   const previewRoot = splitSectionTree(
-    root,
+    workingRoot,
     targetLeaf.id,
     splitPlan.direction,
     splitPlan.originalAt === "first"
@@ -371,16 +443,18 @@ export function buildPanelWorkbenchPreviewState<TData extends SectionComponentDa
 
   let previewState: PanelSectionsState = {
     sections: {
-      ...state.sections,
+      ...workingState.sections,
       [previewIds.panelSectionId]: createEmptyPanelSectionStateItem(previewIds.panelSectionId),
     },
   };
-  previewState = movePanelSectionPanel(previewState, {
-    sourceSectionId: session.currentPanelSectionId,
-    targetSectionId: previewIds.panelSectionId,
-    panelId: session.panelId,
-    targetIndex: 0,
-  });
+  previewState = detachedBase
+    ? insertPanelSectionPanel(previewState, previewIds.panelSectionId, detachedBase.detachedPanel, 0)
+    : movePanelSectionPanel(previewState, {
+      sourceSectionId: session.currentPanelSectionId,
+      targetSectionId: previewIds.panelSectionId,
+      panelId: session.panelId,
+      targetIndex: 0,
+    });
 
   return cleanupEmptyPanelWorkbenchSections(previewRoot, previewState, adapter);
 }
@@ -395,40 +469,50 @@ export function commitPanelWorkbenchDrop<TData extends SectionComponentData>(
     return null;
   }
 
+  const detachedBase = buildDetachedPanelWorkbenchBase(root, state, session, adapter);
+  const workingRoot = detachedBase?.root ?? root;
+  const workingState = detachedBase?.state ?? state;
+
   if (!session.hoverTarget.splitSide) {
     // Cross-section move without split.
-    if (session.hoverTarget.panelSectionId === session.currentPanelSectionId) {
+    if (!detachedBase && session.hoverTarget.panelSectionId === session.currentPanelSectionId) {
       return null;
     }
 
-    const targetSection = state.sections[session.hoverTarget.panelSectionId];
+    const targetSection = workingState.sections[session.hoverTarget.panelSectionId];
     if (!targetSection) {
       return null;
     }
 
-    const movedState = movePanelSectionPanel(state, {
-      sourceSectionId: session.currentPanelSectionId,
-      targetSectionId: session.hoverTarget.panelSectionId,
-      panelId: session.panelId,
-      targetIndex: targetSection.panels.length,
-    });
-    const cleaned = cleanupEmptyPanelWorkbenchSections(root, movedState, adapter);
+    const movedState = detachedBase
+      ? insertPanelSectionPanel(workingState, session.hoverTarget.panelSectionId, detachedBase.detachedPanel, targetSection.panels.length)
+      : movePanelSectionPanel(workingState, {
+        sourceSectionId: session.currentPanelSectionId,
+        targetSectionId: session.hoverTarget.panelSectionId,
+        panelId: session.panelId,
+        targetIndex: targetSection.panels.length,
+      });
+    const cleaned = cleanupEmptyPanelWorkbenchSections(workingRoot, movedState, adapter);
     return {
       ...cleaned,
       activePanelSectionId: session.hoverTarget.panelSectionId,
     };
   }
 
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
+  const targetLeaf = resolvePanelWorkbenchContentTargetLeaf(
+    workingRoot,
+    session.hoverTarget,
+    adapter,
+  );
   if (!targetLeaf || targetLeaf.split || !getPanelSectionId(targetLeaf, adapter)) {
     return null;
   }
 
-  const committedIds = createCommittedPanelWorkbenchIdentifiers(root, state, session.hoverTarget.anchorLeafSectionId);
+  const committedIds = createCommittedPanelWorkbenchIdentifiers(
+    workingRoot,
+    workingState,
+    session.hoverTarget.anchorLeafSectionId ?? targetLeaf.id,
+  );
   const splitPlan = resolvePanelWorkbenchSplitPlan(session.hoverTarget.splitSide);
   const originalDraft = buildSectionDraftFromLeaf(targetLeaf, committedIds.originalChildSectionId);
   const newDraft = adapter.createPanelSectionDraft({
@@ -439,7 +523,7 @@ export function commitPanelWorkbenchDrop<TData extends SectionComponentData>(
   });
 
   const committedRoot = splitSectionTree(
-    root,
+    workingRoot,
     targetLeaf.id,
     splitPlan.direction,
     splitPlan.originalAt === "first"
@@ -449,16 +533,18 @@ export function commitPanelWorkbenchDrop<TData extends SectionComponentData>(
 
   let committedState: PanelSectionsState = {
     sections: {
-      ...state.sections,
+      ...workingState.sections,
       [committedIds.panelSectionId]: createEmptyPanelSectionStateItem(committedIds.panelSectionId),
     },
   };
-  committedState = movePanelSectionPanel(committedState, {
-    sourceSectionId: session.currentPanelSectionId,
-    targetSectionId: committedIds.panelSectionId,
-    panelId: session.panelId,
-    targetIndex: 0,
-  });
+  committedState = detachedBase
+    ? insertPanelSectionPanel(committedState, committedIds.panelSectionId, detachedBase.detachedPanel, 0)
+    : movePanelSectionPanel(committedState, {
+      sourceSectionId: session.currentPanelSectionId,
+      targetSectionId: committedIds.panelSectionId,
+      panelId: session.panelId,
+      targetIndex: 0,
+    });
 
   const cleaned = cleanupEmptyPanelWorkbenchSections(committedRoot, committedState, adapter);
   return {
@@ -482,26 +568,40 @@ export function finalizePanelWorkbenchDrop<TData extends SectionComponentData>(
     return null;
   }
 
+  const detachedBase = buildDetachedPanelWorkbenchBase(root, state, session, adapter);
   let nextState = state;
+  let nextRoot = root;
   let activePanelSectionId = session.currentPanelSectionId;
 
   if (session.hoverTarget?.area === "bar") {
     const targetSectionId = session.hoverTarget.panelSectionId;
-    const actualLocation = findPanelInSectionsState(nextState, session.panelId);
-    const targetSection = nextState.sections[targetSectionId];
+    const targetState = detachedBase?.state ?? nextState;
+    const targetSection = targetState.sections[targetSectionId];
 
-    if (actualLocation && targetSection) {
-      nextState = movePanelSectionPanel(nextState, {
-        sourceSectionId: actualLocation.section.id,
+    if (detachedBase && targetSection) {
+      nextRoot = detachedBase.root;
+      nextState = insertPanelSectionPanel(
+        detachedBase.state,
         targetSectionId,
-        panelId: session.panelId,
-        targetIndex: session.hoverTarget.targetIndex ?? targetSection.panels.length,
-      });
+        detachedBase.detachedPanel,
+        session.hoverTarget.targetIndex ?? targetSection.panels.length,
+      );
       activePanelSectionId = targetSectionId;
+    } else {
+      const actualLocation = findPanelInSectionsState(nextState, session.panelId);
+      if (actualLocation && targetSection) {
+        nextState = movePanelSectionPanel(nextState, {
+          sourceSectionId: actualLocation.section.id,
+          targetSectionId,
+          panelId: session.panelId,
+          targetIndex: session.hoverTarget.targetIndex ?? targetSection.panels.length,
+        });
+        activePanelSectionId = targetSectionId;
+      }
     }
   }
 
-  const cleaned = cleanupEmptyPanelWorkbenchSections(root, nextState, adapter);
+  const cleaned = cleanupEmptyPanelWorkbenchSections(nextRoot, nextState, adapter);
   if (nextState === state && cleaned.root === root && cleaned.state === nextState) {
     return null;
   }

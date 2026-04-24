@@ -144,12 +144,14 @@ describe("panelWorkbench helpers", () => {
     expect(result).not.toBeNull();
     // Source section should be cleaned up (only had 1 panel, now empty)
     expect(result!.state.sections["source-panels"]).toBeUndefined();
-    // A new preview panel section should be created
-    const previewSectionIds = Object.keys(result!.state.sections).filter((id) => id.startsWith("preview-"));
-    expect(previewSectionIds.length).toBe(1);
-    // The preview panel section should have the moved panel
-    const previewSection = result!.state.sections[previewSectionIds[0]];
-    expect(previewSection.panels.map((p) => p.id)).toEqual(["terminal"]);
+    // A detached preview panel section should be created alongside the target section.
+    expect(Object.keys(result!.state.sections)).toHaveLength(2);
+    const previewSection = Object.values(result!.state.sections).find((section) =>
+      section.panels.some((panel) => panel.id === "terminal"),
+    );
+    expect(previewSection).toBeDefined();
+    expect(previewSection!.panels.map((p) => p.id)).toEqual(["terminal"]);
+    expect(result!.state.sections["target-panels"]?.panels.map((p) => p.id)).toEqual(["problems"]);
     // Source-leaf was destroyed (empty section cleanup). The sibling (target-leaf's
     // split children) got promoted into root, so root itself should now be split.
     expect(result!.root.split).toBeTruthy();
@@ -221,6 +223,76 @@ describe("panelWorkbench helpers", () => {
     // sidebar-leaf should be split vertically
     const sidebarNode = findSectionNode(result!.root, "sidebar-leaf");
     expect(sidebarNode?.split?.direction).toBe("vertical");
+  });
+
+  test("single-panel source 的 split commit 应在 detached base 上创建新 section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "source-leaf",
+        "Source",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "source-panels",
+        }),
+      ),
+      second: createDraft(
+        "target-leaf",
+        "Target",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "target-panels",
+        }),
+      ),
+    });
+
+    const state = createPanelSectionsState([
+      {
+        id: "source-panels",
+        panels: [
+          { id: "terminal", label: "Terminal", symbol: "T", content: "Terminal pane" },
+        ],
+        focusedPanelId: "terminal",
+        isCollapsed: false,
+      },
+      {
+        id: "target-panels",
+        panels: [
+          { id: "problems", label: "Problems", symbol: "P", content: "Problems pane" },
+        ],
+        focusedPanelId: "problems",
+        isCollapsed: false,
+      },
+    ]);
+
+    const session = createDragSession({
+      hoverTarget: {
+        area: "content",
+        leafSectionId: "target-leaf",
+        anchorLeafSectionId: "target-leaf",
+        panelSectionId: "target-panels",
+        splitSide: "bottom",
+        contentBounds: { left: 0, top: 100, right: 300, bottom: 400, width: 300, height: 300 },
+      },
+    });
+
+    const result = commitPanelWorkbenchDrop(root, state, session, adapter);
+
+    expect(result).not.toBeNull();
+    expect(result!.state.sections["source-panels"]).toBeUndefined();
+    expect(result!.state.sections["target-panels"]?.panels.map((panel) => panel.id)).toEqual([
+      "problems",
+    ]);
+    const detachedSection = Object.values(result!.state.sections).find((section) =>
+      section.panels.some((panel) => panel.id === "terminal"),
+    );
+    expect(detachedSection).toBeDefined();
+    expect(detachedSection!.id).not.toBe("target-panels");
+    expect(detachedSection!.panels.map((panel) => panel.id)).toEqual(["terminal"]);
+    expect(result!.root.split?.direction).toBe("vertical");
   });
 
   test("commit split top 应将新 section 放在上方", () => {
@@ -325,12 +397,27 @@ describe("panelWorkbench helpers", () => {
     expect(commitPanelWorkbenchDrop(root, state, session, adapter)).toBeNull();
   });
 
-  test("single-panel source 在 hover target 未建立前不应预销毁 source section", () => {
-    const root = createRootSection<TestBindingData>(
-      createDraft("root", "Root", "root", createSectionComponentBinding("panel-section", {
-        panelSectionId: "main-panels",
-      })),
+  test("single-panel source 在 hover target 未建立前应预销毁 source section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
     );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "source-leaf",
+        "Source",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "main-panels",
+        }),
+      ),
+      second: createDraft(
+        "other-leaf",
+        "Other",
+        "container",
+        createSectionComponentBinding("empty", {}),
+      ),
+    });
 
     const state = createPanelSectionsState([
       {
@@ -343,9 +430,91 @@ describe("panelWorkbench helpers", () => {
       },
     ]);
 
-    const session = createDragSession({ hoverTarget: null, currentPanelSectionId: "main-panels" });
+    const session = createDragSession({
+      hoverTarget: null,
+      sourcePanelSectionId: "main-panels",
+      currentPanelSectionId: "main-panels",
+      sourceLeafSectionId: "source-leaf",
+      currentLeafSectionId: "source-leaf",
+    });
 
-    expect(buildPanelWorkbenchPreviewState(root, state, session, adapter)).toBeNull();
+    const preview = buildPanelWorkbenchPreviewState(root, state, session, adapter);
+
+    expect(preview).not.toBeNull();
+    expect(preview!.state.sections["main-panels"]).toBeUndefined();
+    expect(findSectionNode(preview!.root, "source-leaf")).toBeNull();
+    expect(preview!.root.split).toBeNull();
+  });
+
+  test("single-panel source 在 panel bar drop 时应沿用 detached base 并回收空 source section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "source-leaf",
+        "Source",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "source-panels",
+        }),
+      ),
+      second: createDraft(
+        "target-leaf",
+        "Target",
+        "sidebar",
+        createSectionComponentBinding("panel-section", {
+          panelSectionId: "target-panels",
+        }),
+      ),
+    });
+
+    const state = createPanelSectionsState([
+      {
+        id: "source-panels",
+        panels: [
+          { id: "outline", label: "Outline", symbol: "O", content: "Outline" },
+        ],
+        focusedPanelId: "outline",
+        isCollapsed: false,
+      },
+      {
+        id: "target-panels",
+        panels: [
+          { id: "files", label: "Files", symbol: "F", content: "Files" },
+        ],
+        focusedPanelId: "files",
+        isCollapsed: false,
+      },
+    ]);
+
+    const session = createDragSession({
+      sourcePanelSectionId: "source-panels",
+      currentPanelSectionId: "source-panels",
+      sourceLeafSectionId: "source-leaf",
+      currentLeafSectionId: "source-leaf",
+      panelId: "outline",
+      label: "Outline",
+      symbol: "O",
+      content: "Outline",
+      hoverTarget: {
+        area: "bar",
+        leafSectionId: "target-leaf",
+        panelSectionId: "target-panels",
+        targetIndex: 1,
+      },
+    });
+
+    const result = finalizePanelWorkbenchDrop(root, state, session, adapter);
+
+    expect(result).not.toBeNull();
+    expect(result!.state.sections["source-panels"]).toBeUndefined();
+    expect(result!.state.sections["target-panels"]?.panels.map((panel) => panel.id)).toEqual([
+      "files",
+      "outline",
+    ]);
+    expect(result!.root.split).toBeNull();
   });
 
   test("cleanup 应移除空的非 root panel section 并销毁对应 leaf", () => {
