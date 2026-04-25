@@ -150,6 +150,63 @@ describe("layoutV2 example state", () => {
     expect(cleaned.state.sections["review-tabs"]?.isRoot).toBeFalsy();
   });
 
+  test("关闭提升后的唯一剩余 tab section 时应保留空 section", () => {
+    let root = createRootSection<ExampleSectionLayoutData>(
+      createExampleSectionDraft(
+        "root",
+        "Root",
+        "root",
+        createSectionComponentBinding("empty", {}),
+      ),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createExampleSectionDraft(
+        "main-leaf",
+        "Main",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "main-tabs",
+        }),
+      ),
+      second: createExampleSectionDraft(
+        "canvas-leaf",
+        "Canvas",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "canvas-tabs",
+        }),
+      ),
+    });
+
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [{ id: "welcome", title: "Welcome", content: "Welcome card" }],
+        focusedTabId: "welcome",
+        isRoot: true,
+      },
+      {
+        id: "canvas-tabs",
+        tabs: [{ id: "canvas", title: "Canvas", content: "Canvas card" }],
+        focusedTabId: "canvas",
+        isRoot: false,
+      },
+    ]);
+
+    const afterLeftClose = closeTabInLayoutState(root, state, "main-tabs", "welcome");
+
+    expect(afterLeftClose.state.sections["main-tabs"]).toBeUndefined();
+    expect(afterLeftClose.state.sections["canvas-tabs"]?.isRoot).toBe(true);
+
+    const afterLastClose = closeTabInLayoutState(afterLeftClose.root, afterLeftClose.state, "canvas-tabs", "canvas");
+
+    expect(Object.keys(afterLastClose.state.sections)).toEqual(["canvas-tabs"]);
+    expect(afterLastClose.state.sections["canvas-tabs"]?.isRoot).toBe(true);
+    expect(afterLastClose.state.sections["canvas-tabs"]?.tabs).toEqual([]);
+    expect(findTabSectionLeaf(afterLastClose.root, "canvas-tabs")?.id).toBe("root");
+  });
+
   test("preview split 应将拖拽 tab 放入预览分区并折叠空源 section", () => {
     let root = createRootSection<ExampleSectionLayoutData>(
       createExampleSectionDraft(

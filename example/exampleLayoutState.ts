@@ -702,6 +702,12 @@ export function cleanupEmptyTabSections(
         continue;
       }
 
+      const hasOtherTabSections = Object.keys(nextState.sections)
+        .some((sectionId) => sectionId !== tabSectionId);
+      if (!hasOtherTabSections) {
+        continue;
+      }
+
       const context = findTabSectionLeafContext(nextRoot, tabSectionId);
       if (!context) {
         const nextCandidateState = removeTabSection(nextState, tabSectionId);

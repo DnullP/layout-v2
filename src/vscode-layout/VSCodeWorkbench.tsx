@@ -285,11 +285,7 @@ export function closeWorkbenchTabState(
     const hasOtherTabSections = Object.keys(currentState.tabSections.sections)
         .some((sectionId) => sectionId !== sourceSectionId);
 
-    if (
-        sourceSectionId === WORKBENCH_MAIN_TAB_SECTION_ID &&
-        nextTabs.length === 0 &&
-        !hasOtherTabSections
-    ) {
+    if (nextTabs.length === 0 && !hasOtherTabSections) {
         return {
             didClose: true,
             nextState: {
@@ -302,7 +298,7 @@ export function closeWorkbenchTabState(
                 },
                 workbench: {
                     ...(currentState.workbench ?? {}),
-                    activeGroupId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    activeGroupId: sourceSectionId,
                 },
             },
         };

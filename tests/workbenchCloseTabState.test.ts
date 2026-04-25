@@ -209,4 +209,78 @@ describe("closeWorkbenchTabState", () => {
         expect(remainingSection?.tabs.map((tab) => tab.id)).toEqual(["review"]);
         expect(result.nextState.workbench?.activeGroupId).toBe(remainingSection?.id ?? null);
     });
+
+    test("closing the last promoted tab section after right split cleanup should keep an empty section instead of removing all tabs", () => {
+        const initialState = createWorkbenchLayoutState({
+            initialTabs: [
+                {
+                    id: "welcome",
+                    title: "Welcome",
+                    component: "welcome-page",
+                },
+                {
+                    id: "canvas",
+                    title: "测试canvas.canvas",
+                    component: "canvas",
+                },
+            ],
+        });
+
+        const committed = commitTabWorkbenchDrop(
+            initialState.root,
+            initialState.tabSections,
+            {
+                sourceTabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                currentTabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                sourceLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                currentLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                tabId: "canvas",
+                title: "测试canvas.canvas",
+                content: "Component: canvas",
+                pointerId: 1,
+                originX: 0,
+                originY: 0,
+                pointerX: 10,
+                pointerY: 10,
+                phase: "dragging",
+                hoverTarget: {
+                    area: "content",
+                    leafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    anchorLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    tabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    splitSide: "right",
+                    contentBounds: {
+                        left: 0,
+                        top: 0,
+                        right: 300,
+                        bottom: 200,
+                        width: 300,
+                        height: 200,
+                    },
+                },
+            },
+            workbenchTabAdapter,
+        );
+
+        expect(committed).not.toBeNull();
+
+        const afterLeftClose = closeWorkbenchTabState({
+            ...initialState,
+            root: committed!.root,
+            tabSections: committed!.state,
+            workbench: { activeGroupId: WORKBENCH_MAIN_TAB_SECTION_ID },
+        }, "welcome");
+
+        const remainingSectionId = Object.keys(afterLeftClose.nextState.tabSections.sections)[0];
+        expect(remainingSectionId).toBeTruthy();
+        expect(afterLeftClose.nextState.tabSections.sections[remainingSectionId]?.tabs.map((tab) => tab.id)).toEqual(["canvas"]);
+
+        const afterLastClose = closeWorkbenchTabState(afterLeftClose.nextState, "canvas");
+
+        expect(afterLastClose.didClose).toBe(true);
+        expect(Object.keys(afterLastClose.nextState.tabSections.sections)).toEqual([remainingSectionId]);
+        expect(afterLastClose.nextState.tabSections.sections[remainingSectionId]?.isRoot).toBe(true);
+        expect(afterLastClose.nextState.tabSections.sections[remainingSectionId]?.tabs).toEqual([]);
+        expect(afterLastClose.nextState.workbench?.activeGroupId).toBe(remainingSectionId);
+    });
 });
