@@ -161,12 +161,15 @@
 
 .layout-v2-tab-section__card--active {
   visibility: visible;
+  opacity: 1;
   pointer-events: auto;
   z-index: 1;
 }
 
+/* inactive card：保持组件挂载但整体透明，避免子组件将 visibility 重新设为 visible 后逃逸显示。 */
 .layout-v2-tab-section__card--inactive {
   visibility: hidden;
+  opacity: 0;
   pointer-events: none;
   z-index: 0;
 }
