@@ -82,12 +82,17 @@ export function TabSectionDragPreview(props: {
                 finalSession = flushPointerMove() ?? finalSession;
             }
 
-            sessionRef.current = null;
-            handleSessionChange(null);
-
             if (finalSession?.phase === "dragging") {
                 onSessionEnd?.(finalSession);
+                if (!onSessionEnd) {
+                    handleSessionChange(null);
+                }
+                sessionRef.current = null;
+                return;
             }
+
+            sessionRef.current = null;
+            handleSessionChange(null);
         }
 
         window.addEventListener("pointermove", handlePointerMove);

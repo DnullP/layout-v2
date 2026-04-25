@@ -34,6 +34,7 @@ import {
     type PanelSectionHoverTarget,
 } from "../panel-section/panelSectionDrag";
 import { TabSection, TabDragSessionContext } from "../tab-section/TabSection";
+import type { TabSectionInactiveContentPolicy } from "../tab-section/TabSection";
 import { TabSectionDragPreview } from "../tab-section/TabSectionDragPreview";
 import { type TabSectionDragSession } from "../tab-section/tabSectionDrag";
 import { type TabSectionTabDefinition, type TabSectionTabMove, type TabSectionsState } from "../tab-section/tabSectionModel";
@@ -138,8 +139,12 @@ export interface VSCodeWorkbenchProps {
     initialPanelLayoutSnapshot?: WorkbenchPanelLayoutSnapshot | null;
     /** 空 panel section 是否隐藏 panel bar。 */
     hideEmptyPanelBar?: boolean;
-    /** 是否渲染非激活 tab 内容。默认开启以保留通用宿主的缓存行为。 */
-    renderInactiveTabContent?: boolean;
+    /** 是否渲染非激活 tab 内容。默认开启以保留通用宿主的缓存行为；函数形式可按 tab 细分。 */
+    renderInactiveTabContent?: TabSectionInactiveContentPolicy;
+    /** 指定哪些 tab 内容需要等待组件通过 api.markContentReady 提交后再展示。 */
+    deferTabContentPresentation?: (tab: TabSectionTabDefinition) => boolean;
+    /** 指定哪些 panel 内容需要等待 context.markContentReady 提交后再展示。 */
+    deferPanelContentPresentation?: (panel: PanelSectionPanelDefinition) => boolean;
     /** 是否在拖拽 tab 时实时渲染 split/merge 预览布局。默认开启；重型 editor 宿主可关闭以避免预览期反复 remount。 */
     renderTabDragPreviewLayout?: boolean;
     /** tab 拖拽预览布局渲染模式。inline 会替换主布局；overlay 会覆盖显示预览但保留已提交布局挂载。 */
@@ -479,6 +484,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         initialPanelLayoutSnapshot,
         hideEmptyPanelBar = false,
         renderInactiveTabContent = true,
+        deferTabContentPresentation,
+        deferPanelContentPresentation,
         renderTabDragPreviewLayout = true,
         tabDragPreviewRenderMode = "inline",
         preserveActiveTabContentDuringDrag = false,
@@ -515,9 +522,37 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const [activityBarDragSession, setActivityBarDragSession] = useState<ActivityBarDragSession | null>(null);
     const [panelDragSession, setPanelDragSession] = useState<PanelSectionDragSession | null>(null);
     const [tabDragSession, setTabDragSession] = useState<TabSectionDragSession | null>(null);
+    const committedTabDragSessionKeyRef = useRef<string | null>(null);
+    const isCommittingTabDropRef = useRef(false);
+    const [readyTabContentIds, setReadyTabContentIds] = useState<ReadonlySet<string>>(() => new Set());
+    const [readyPanelContentIds, setReadyPanelContentIds] = useState<ReadonlySet<string>>(() => new Set());
     const livePanelDragSession = panelDragSession && !isEndedPanelSectionDragSession(panelDragSession)
         ? panelDragSession
         : null;
+
+    const markTabContentReady = useCallback((tabId: string): void => {
+        setReadyTabContentIds((previous) => {
+            if (previous.has(tabId)) {
+                return previous;
+            }
+
+            const next = new Set(previous);
+            next.add(tabId);
+            return next;
+        });
+    }, []);
+
+    const markPanelContentReady = useCallback((panelId: string): void => {
+        setReadyPanelContentIds((previous) => {
+            if (previous.has(panelId)) {
+                return previous;
+            }
+
+            const next = new Set(previous);
+            next.add(panelId);
+            return next;
+        });
+    }, []);
 
     const handlePanelDragSessionChange = useCallback((session: PanelSectionDragSession | null): void => {
         if (isEndedPanelSectionDragSession(session)) {
@@ -581,6 +616,47 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
     }
     const store = storeRef.current;
+    const commitTabDragSession = useCallback((session: TabSectionDragSession): void => {
+        const sessionKey = [
+            session.sourceTabSectionId,
+            session.tabId,
+            session.pointerId,
+            session.originX,
+            session.originY,
+        ].join(":");
+
+        if (committedTabDragSessionKeyRef.current === sessionKey) {
+            setTabDragSession(null);
+            return;
+        }
+
+        committedTabDragSessionKeyRef.current = sessionKey;
+        const committed = commitTabWorkbenchDrop(
+            store.getState().root,
+            store.getState().tabSections,
+            session,
+            workbenchTabAdapter,
+        );
+        if (!committed) {
+            setTabDragSession(null);
+            return;
+        }
+
+        isCommittingTabDropRef.current = true;
+        store.replaceState({
+            ...store.getState(),
+            root: committed.root,
+            tabSections: committed.state,
+            workbench: { activeGroupId: committed.activeTabSectionId },
+        });
+        setTabDragSession(null);
+    }, [store]);
+
+    useEffect(() => {
+        if (!tabDragSession) {
+            isCommittingTabDropRef.current = false;
+        }
+    }, [tabDragSession]);
     const state = useVSCodeLayoutStoreState(store);
     const layoutRoot = useMemo(() => {
         let nextRoot = setSectionHidden(state.root, "left-sidebar", !leftSidebarVisible);
@@ -589,6 +665,52 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
         return nextRoot;
     }, [state.root, hasRightSidebar, leftSidebarVisible, rightSidebarVisible]);
+
+    useEffect(() => {
+        const liveTabIds = new Set<string>();
+        for (const section of Object.values(state.tabSections.sections)) {
+            for (const tab of section.tabs) {
+                liveTabIds.add(tab.id);
+            }
+        }
+
+        setReadyTabContentIds((previous) => {
+            let changed = false;
+            const next = new Set<string>();
+            for (const tabId of previous) {
+                if (liveTabIds.has(tabId)) {
+                    next.add(tabId);
+                } else {
+                    changed = true;
+                }
+            }
+
+            return changed ? next : previous;
+        });
+    }, [state.tabSections]);
+
+    useEffect(() => {
+        const livePanelIds = new Set<string>();
+        for (const section of Object.values(state.panelSections.sections)) {
+            for (const panel of section.panels) {
+                livePanelIds.add(panel.id);
+            }
+        }
+
+        setReadyPanelContentIds((previous) => {
+            let changed = false;
+            const next = new Set<string>();
+            for (const panelId of previous) {
+                if (livePanelIds.has(panelId)) {
+                    next.add(panelId);
+                } else {
+                    changed = true;
+                }
+            }
+
+            return changed ? next : previous;
+        });
+    }, [state.panelSections]);
 
     // --- Late-arriving section ratio restoration ---
     // backendConfig loads async, so initialSectionRatios may be undefined on
@@ -1026,15 +1148,21 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         closeTab,
         setActiveTab,
         activatePanel: activatePanelById,
-    }), [activeTabId, openTab, updateTab, closeTab, setActiveTab, activatePanelById]);
+        markContentReady: () => {
+            if (hostPanelId) {
+                markPanelContentReady(hostPanelId);
+            }
+        },
+    }), [activeTabId, openTab, updateTab, closeTab, setActiveTab, activatePanelById, markPanelContentReady]);
 
     // --- Tab DnD preview ---
+    const effectiveTabDragSession = isCommittingTabDropRef.current ? null : tabDragSession;
     const tabPreview = useMemo(
         () => renderTabDragPreviewLayout
-            ? buildTabWorkbenchPreviewState(layoutRoot, state.tabSections, tabDragSession, workbenchTabAdapter)
+            ? buildTabWorkbenchPreviewState(layoutRoot, state.tabSections, effectiveTabDragSession, workbenchTabAdapter)
             : null,
         // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
-        [renderTabDragPreviewLayout, layoutRoot, state.tabSections, tabDragSession?.phase, tabDragSession?.hoverTarget],
+        [renderTabDragPreviewLayout, layoutRoot, state.tabSections, effectiveTabDragSession?.phase, effectiveTabDragSession?.hoverTarget],
     );
     const shouldRenderTabPreviewOverlay = Boolean(tabPreview && tabDragPreviewRenderMode === "overlay");
     const shouldRenderInlineTabPreview = !shouldRenderTabPreviewOverlay;
@@ -1243,6 +1371,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     dragSession={livePanelDragSession}
                     activityDragSession={activityBarDragSession}
                     focusBridge={isRight ? rightPanelFocusBridge : leftPanelFocusBridge}
+                    deferPanelContentPresentation={deferPanelContentPresentation}
+                    isPanelContentReady={(panel) => readyPanelContentIds.has(panel.id)}
                     renderPanelTab={(panel) => (
                         (panel.meta?.icon as ReactNode | undefined) ?? (
                             <span style={{ fontSize: 12, fontWeight: 600 }}>{panel.symbol}</span>
@@ -1252,6 +1382,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         if (renderPanelContent) {
                             return renderPanelContent(panel.id, buildPanelContext(panel.id));
                         }
+
                         return <div style={{ padding: 12 }}>{panel.label}</div>;
                     }}
                     onDragSessionChange={handlePanelDragSessionChange}
@@ -1334,7 +1465,6 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
                         const payload = readWorkbenchTabPayload(tab);
                         const Component = tabComponents[payload.component];
-
                         if (!Component) {
                             return (
                                 <div style={{ padding: 16 }}>
@@ -1352,30 +1482,17 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                                     close: () => closeTab(tab.id),
                                     setActive: () => setActiveTab(tab.id),
                                     setTitle: (title) => updateTab(tab.id, { title }),
+                                    markContentReady: () => markTabContentReady(tab.id),
                                 }}
                             />
                         );
                     }}
                     renderInactiveTabContent={renderInactiveTabContent}
+                    deferTabContentPresentation={deferTabContentPresentation}
+                    isTabContentReady={(tab) => readyTabContentIds.has(tab.id)}
                     preserveActiveTabContentDuringDrag={preserveActiveTabContentDuringDrag}
                     onDragSessionChange={setTabDragSession}
-                    onDragSessionEnd={(session) => {
-                        setTabDragSession(null);
-                        const committed = commitTabWorkbenchDrop(
-                            store.getState().root,
-                            store.getState().tabSections,
-                            session,
-                            workbenchTabAdapter,
-                        );
-                        if (!committed) return;
-
-                        store.replaceState({
-                            ...store.getState(),
-                            root: committed.root,
-                            tabSections: committed.state,
-                            workbench: { activeGroupId: committed.activeTabSectionId },
-                        });
-                    }}
+                    onDragSessionEnd={commitTabDragSession}
                     onFocusTab={setActiveTab}
                     onCloseTab={closeTab}
                     onMoveTab={moveWorkbenchTab}
@@ -1391,6 +1508,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         renderPanelContent,
         renderTabTitle,
         renderInactiveTabContent,
+        deferPanelContentPresentation,
+        deferTabContentPresentation,
+        readyPanelContentIds,
+        readyTabContentIds,
+        markTabContentReady,
         renderTabDragPreviewLayout,
         tabDragPreviewRenderMode,
         preserveActiveTabContentDuringDrag,
@@ -1406,6 +1528,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         openTab,
         closeTab,
         moveWorkbenchTab,
+        commitTabDragSession,
         setActiveTab,
         store,
         leftActivityFocusBridge,
@@ -1463,7 +1586,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     }, [renderTabDragPreviewContent, renderTabTitle, tabPreview]);
 
     return (
-        <TabDragSessionContext.Provider value={tabDragSession}>
+        <TabDragSessionContext.Provider value={effectiveTabDragSession}>
         <div className={className} style={{ width: "100%", height: "100%", position: "relative" }} role="main" aria-label="Dockview Main Area" data-testid="main-dockview-host">
             <SectionLayoutView
                 root={renderedRoot}
@@ -1488,25 +1611,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 </div>
             ) : null}
             <TabSectionDragPreview
-                session={tabDragSession}
+                session={effectiveTabDragSession}
                 onSessionChange={setTabDragSession}
-                onSessionEnd={(session) => {
-                    setTabDragSession(null);
-                    const committed = commitTabWorkbenchDrop(
-                        store.getState().root,
-                        store.getState().tabSections,
-                        session,
-                        workbenchTabAdapter,
-                    );
-                    if (!committed) return;
-
-                    store.replaceState({
-                        ...store.getState(),
-                        root: committed.root,
-                        tabSections: committed.state,
-                        workbench: { activeGroupId: committed.activeTabSectionId },
-                    });
-                }}
+                onSessionEnd={commitTabDragSession}
             />
             <ActivityBarDragPreview
                 session={activityBarDragSession}

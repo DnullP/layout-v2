@@ -123,6 +123,69 @@ describe("render adapters", () => {
         expect(tabMarkup).toContain("layout-v2-tab-section__card--active");
     });
 
+    test("等待提交的 focused tab 应先隐藏挂载内容并标记 pending", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "welcome", title: "Welcome", content: "Welcome page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                renderInactiveTabContent={false}
+                deferTabContentPresentation={(tab) => tab.id === "guide"}
+                isTabContentReady={() => false}
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).toContain('data-host-tab-content="guide"');
+        expect(tabMarkup).toContain('data-layout-pending-tab-id="guide"');
+        expect(tabMarkup).toContain('data-layout-presentation-state="pending"');
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--pending");
+        expect(tabMarkup).not.toContain("layout-v2-tab-section__card--active");
+    });
+
+    test("非激活 tab 内容策略函数应只保留匹配的 tab 内容", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "graph", title: "Graph", content: "Graph page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                        { id: "home", title: "Home", content: "Home page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                renderInactiveTabContent={(tab) => tab.id === "graph"}
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).toContain('data-host-tab-content="graph"');
+        expect(tabMarkup).toContain('data-host-tab-content="guide"');
+        expect(tabMarkup).not.toContain('data-host-tab-content="home"');
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--inactive");
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--active");
+    });
+
     test("拖拽 active tab 时可保留其内容挂载但隐藏", () => {
         const tabMarkup = renderToStaticMarkup(
             <TabSection
@@ -242,6 +305,36 @@ describe("render adapters", () => {
 
         expect(panelMarkup).toContain('data-host-panel-content="ai-chat"');
         expect(panelMarkup).toContain("AI content");
+    });
+
+    test("等待提交的 focused panel 应先隐藏挂载内容并标记 pending", () => {
+        const panelMarkup = renderToStaticMarkup(
+            <PanelSection
+                leafSectionId="left"
+                committedLeafSectionId="left"
+                panelSectionId="left-panel"
+                panelSection={{
+                    id: "left-panel",
+                    panels: [
+                        { id: "files", label: "Files", symbol: "F", content: "Files panel" },
+                    ],
+                    focusedPanelId: "files",
+                    isCollapsed: false,
+                }}
+                deferPanelContentPresentation={(panel) => panel.id === "files"}
+                isPanelContentReady={() => false}
+                renderPanelContent={(panel) => <div data-host-panel-content={panel.id}>{panel.content}</div>}
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
+            />,
+        );
+
+        expect(panelMarkup).toContain('data-host-panel-content="files"');
+        expect(panelMarkup).toContain('data-layout-pending-panel-id="files"');
+        expect(panelMarkup).toContain('data-layout-presentation-state="pending"');
+        expect(panelMarkup).toContain("layout-v2-panel-section__pane--pending");
+        expect(panelMarkup).not.toContain("layout-v2-panel-section__pane--active");
     });
 });
 

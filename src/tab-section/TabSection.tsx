@@ -79,6 +79,24 @@ export type TabSectionTitleRenderer = (tab: TabSectionTabDefinition) => ReactNod
 export type TabSectionContentRendererRegistry = Record<string, TabSectionContentRenderer>;
 
 /**
+ * @type TabSectionInactiveContentPolicy
+ * @description 控制非激活 tab 内容是否保留挂载；boolean 表示全局策略，函数表示按 tab 细分。
+ */
+export type TabSectionInactiveContentPolicy = boolean | ((tab: TabSectionTabDefinition) => boolean);
+
+/**
+ * @type TabSectionPresentationPolicy
+ * @description 判断 tab 内容是否需要等待内部组件提交 ready 后再展示。
+ */
+export type TabSectionPresentationPolicy = (tab: TabSectionTabDefinition) => boolean;
+
+/**
+ * @type TabSectionContentReadyResolver
+ * @description 查询 tab 内容是否已经完成首开初始化，可提交到可见层。
+ */
+export type TabSectionContentReadyResolver = (tab: TabSectionTabDefinition) => boolean;
+
+/**
  * @constant TAB_STRIP_HYSTERESIS_PX
  * @description 相邻 tab 落点切换时的滞回范围。
  */
@@ -273,7 +291,9 @@ export function TabSection(props: {
   contentRegistry?: TabSectionContentRendererRegistry;
   renderTabContent?: TabSectionContentRenderer;
   renderTabTitle?: TabSectionTitleRenderer;
-  renderInactiveTabContent?: boolean;
+  renderInactiveTabContent?: TabSectionInactiveContentPolicy;
+  deferTabContentPresentation?: TabSectionPresentationPolicy;
+  isTabContentReady?: TabSectionContentReadyResolver;
   preserveActiveTabContentDuringDrag?: boolean;
   onDragSessionChange?: (session: TabSectionDragSession | null) => void;
   onDragSessionEnd?: (session: TabSectionDragSession) => void;
@@ -295,6 +315,8 @@ export function TabSection(props: {
     renderTabContent,
     renderTabTitle,
     renderInactiveTabContent = true,
+    deferTabContentPresentation,
+    isTabContentReady,
     preserveActiveTabContentDuringDrag = false,
     onDragSessionChange,
     onDragSessionEnd,
@@ -336,6 +358,23 @@ export function TabSection(props: {
   }
 
   const activeCard = tabSection.tabs.find((tab) => tab.id === tabSection.focusedTabId) ?? null;
+  const isTabReadyForPresentation = (tab: TabSectionTabDefinition): boolean => {
+    if (!(deferTabContentPresentation?.(tab) ?? false)) {
+      return true;
+    }
+
+    return isTabContentReady?.(tab) ?? false;
+  };
+  const initialCommittedCardId = activeCard && isTabReadyForPresentation(activeCard)
+    ? activeCard.id
+    : null;
+  const [committedCardId, setCommittedCardId] = useState<string | null>(initialCommittedCardId);
+  const committedCard = committedCardId
+    ? tabSection.tabs.find((tab) => tab.id === committedCardId) ?? null
+    : null;
+  const isActiveCardReadyForPresentation = activeCard
+    ? isTabReadyForPresentation(activeCard)
+    : false;
   const draggingTabId = dragSession?.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
@@ -349,16 +388,53 @@ export function TabSection(props: {
     activeCard &&
     activeCard.id === dragSession.tabId,
   );
-  const visibleCardId = shouldHideActiveCard ? null : activeCard?.id ?? null;
+  const visibleCardId = shouldHideActiveCard
+    ? null
+    : isActiveCardReadyForPresentation
+      ? activeCard?.id ?? null
+      : committedCard?.id ?? null;
+  const pendingCardId = !shouldHideActiveCard && activeCard && !isActiveCardReadyForPresentation
+    ? activeCard.id
+    : null;
   const preservedDraggingCardId = shouldHideActiveCard && preserveActiveTabContentDuringDrag
     ? activeCard?.id ?? null
     : null;
   const renderedCardId = visibleCardId ?? preservedDraggingCardId;
-  const renderedContentTabs = renderInactiveTabContent
-    ? tabSection.tabs
-    : renderedCardId
-      ? tabSection.tabs.filter((tab) => tab.id === renderedCardId)
-      : [];
+  const shouldRenderInactiveTab = (tab: TabSectionTabDefinition): boolean => {
+    if (renderInactiveTabContent === true) {
+      return true;
+    }
+
+    if (typeof renderInactiveTabContent === "function") {
+      return renderInactiveTabContent(tab);
+    }
+
+    return false;
+  };
+  const renderedContentTabs = tabSection.tabs.filter((tab) => {
+    if (renderedCardId && tab.id === renderedCardId) {
+      return true;
+    }
+
+    if (pendingCardId && tab.id === pendingCardId) {
+      return true;
+    }
+
+    return shouldRenderInactiveTab(tab);
+  });
+
+  useLayoutEffect(() => {
+    if (activeCard && isTabReadyForPresentation(activeCard)) {
+      if (committedCardId !== activeCard.id) {
+        setCommittedCardId(activeCard.id);
+      }
+      return;
+    }
+
+    if (committedCardId && !tabSection.tabs.some((tab) => tab.id === committedCardId)) {
+      setCommittedCardId(null);
+    }
+  }, [activeCard?.id, committedCardId, deferTabContentPresentation, isTabContentReady, tabSection.tabs]);
 
   useEffect(() => {
     if (!trackPointerLifecycle || !dragSession || !tabSection.tabs.some((tab) => tab.id === dragSession.tabId)) {
@@ -766,6 +842,8 @@ export function TabSection(props: {
             "data-layout-role": "tab-content",
             "data-layout-tab-section-id": tabSection.id,
             "data-layout-tab-id": activeCard?.id,
+            "data-layout-presented-tab-id": visibleCardId ?? undefined,
+            "data-layout-pending-tab-id": pendingCardId ?? undefined,
           },
           focusBridge?.getContentAttributes?.(tabSection, activeCard),
         )}
@@ -779,20 +857,23 @@ export function TabSection(props: {
           }
         }}
       >
-        {renderedCardId ? (
+        {renderedContentTabs.length > 0 ? (
           renderedContentTabs.map((tab) => {
             const isVisible = tab.id === visibleCardId;
+            const isPending = tab.id === pendingCardId;
 
             return (
               <div
                 key={tab.id}
                 aria-hidden={!isVisible}
+                data-layout-presentation-state={isVisible ? "committed" : isPending ? "pending" : "inactive"}
                 className={[
                   "layout-v2-tab-section__card",
                   getCardToneClassName(tab.tone),
                   isVisible
                     ? "layout-v2-tab-section__card--active"
                     : "layout-v2-tab-section__card--inactive",
+                  isPending ? "layout-v2-tab-section__card--pending" : "",
                 ].join(" ")}
               >
                 <div className="layout-v2-tab-section__card-title">
@@ -802,9 +883,13 @@ export function TabSection(props: {
               </div>
             );
           })
-        ) : (
+        ) : null}
+        {!visibleCardId && pendingCardId ? (
+          <div className="layout-v2-tab-section__presentation-pending" aria-live="polite">Preparing content</div>
+        ) : null}
+        {renderedContentTabs.length === 0 && !pendingCardId ? (
           <div className="layout-v2-tab-section__empty-card">Drop tab or focus another tab</div>
-        )}
+        ) : null}
       </div>
     </div>
   );

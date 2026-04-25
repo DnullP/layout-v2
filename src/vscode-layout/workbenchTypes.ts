@@ -62,10 +62,16 @@ export interface WorkbenchTabDefinition {
  * Tab component 的 API 接口，由 workbench 提供给 tab 渲染器。
  */
 export interface WorkbenchTabApi {
+    /** 当前 tab 的唯一 ID。 */
     id: string;
+    /** 关闭当前 tab。 */
     close: () => void;
+    /** 激活当前 tab。 */
     setActive: () => void;
+    /** 更新当前 tab 标题。 */
     setTitle: (title: string) => void;
+    /** 通知 layout 当前 tab 首开内容已完成初始化，可以提交到可见层。 */
+    markContentReady: () => void;
 }
 
 /**
@@ -86,6 +92,8 @@ export interface WorkbenchPanelContext {
     setActiveTab: (tabId: string) => void;
     /** 激活一个 panel。 */
     activatePanel: (panelId: string) => void;
+    /** 通知 layout 当前 panel 首开内容已完成初始化，可以提交到可见层。 */
+    markContentReady: () => void;
 }
 
 /**

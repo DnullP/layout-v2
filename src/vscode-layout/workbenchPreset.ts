@@ -309,22 +309,40 @@ export interface WorkbenchPanelLayoutSnapshot {
     sections: WorkbenchPanelSectionLayoutSnapshot[];
 }
 
-function cloneSectionNode<T>(node: SectionNode<T>): SectionNode<T> {
-    return {
+/**
+ * @function clonePanelLayoutSectionNode
+ * @description 克隆 panel layout 快照用 section tree，并折叠 tab-section split，避免 panelLayout 持久化主编辑区 tab 拓扑。
+ * @param node 待克隆 section 节点。
+ * @returns 仅保留 panel 拓扑语义的 section tree 节点。
+ */
+function clonePanelLayoutSectionNode(node: SectionNode<WorkbenchSectionData>): SectionNode<WorkbenchSectionData> {
+    const binding = getSectionComponentBinding(node);
+    const clonedNode: SectionNode<WorkbenchSectionData> = {
         ...node,
-        data: { ...(node.data as object) } as T,
+        data: { ...node.data },
         resizableEdges: { ...node.resizableEdges },
         meta: node.meta ? { ...node.meta } : undefined,
-        split: node.split
-            ? {
-                  direction: node.split.direction,
-                  ratio: node.split.ratio,
-                  children: [
-                      cloneSectionNode(node.split.children[0]),
-                      cloneSectionNode(node.split.children[1]),
-                  ],
-              }
-            : null,
+        split: null,
+    };
+
+    if (binding.type === "tab-section") {
+        return clonedNode;
+    }
+
+    if (!node.split) {
+        return clonedNode;
+    }
+
+    return {
+        ...clonedNode,
+        split: {
+            direction: node.split.direction,
+            ratio: node.split.ratio,
+            children: [
+                clonePanelLayoutSectionNode(node.split.children[0]),
+                clonePanelLayoutSectionNode(node.split.children[1]),
+            ],
+        },
     };
 }
 
@@ -357,6 +375,40 @@ function collectPanelSectionIds(root: SectionNode<WorkbenchSectionData>): Set<st
     return ids;
 }
 
+/**
+ * @function collectTabSectionIds
+ * @description 收集 section tree 中承载的 tab section id，用于拒绝污染进 panelLayout 的主编辑区 split 拓扑。
+ * @param root section tree 根节点。
+ * @returns tab section id 集合。
+ */
+function collectTabSectionIds(root: SectionNode<WorkbenchSectionData>): Set<string> {
+    const ids = new Set<string>();
+    const queue: SectionNode<WorkbenchSectionData>[] = [root];
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+            continue;
+        }
+
+        if (current.split) {
+            queue.push(current.split.children[0], current.split.children[1]);
+        }
+
+        const binding = getSectionComponentBinding(current);
+        if (binding.type !== "tab-section") {
+            continue;
+        }
+
+        const tabSectionId = (binding.props as { tabSectionId?: unknown }).tabSectionId;
+        if (typeof tabSectionId === "string" && tabSectionId.trim()) {
+            ids.add(tabSectionId);
+        }
+    }
+
+    return ids;
+}
+
 function buildPanelDefinitionById(
     state: VSCodeLayoutState<WorkbenchSectionData>,
 ): Map<string, PanelSectionPanelDefinition> {
@@ -379,7 +431,7 @@ export function exportWorkbenchPanelLayoutSnapshot(
     state: VSCodeLayoutState<WorkbenchSectionData>,
 ): WorkbenchPanelLayoutSnapshot {
     return {
-        root: cloneSectionNode(state.root),
+        root: clonePanelLayoutSectionNode(state.root),
         sections: Object.values(state.panelSections.sections).map((section) => ({
             id: section.id,
             panelIds: section.panels.map((panel) => panel.id),
@@ -405,8 +457,13 @@ export function applyWorkbenchPanelLayoutSnapshot(
         return state;
     }
 
-    const root = cloneSectionNode(snapshot.root);
+    const root = clonePanelLayoutSectionNode(snapshot.root);
     if (!findSectionNode(root, WORKBENCH_LEFT_PANEL_SECTION_ID) && !findSectionNode(root, "left-sidebar")) {
+        return state;
+    }
+
+    const tabSectionIds = collectTabSectionIds(root);
+    if (tabSectionIds.size !== 1 || !tabSectionIds.has(WORKBENCH_MAIN_TAB_SECTION_ID)) {
         return state;
     }
 

@@ -40,6 +40,10 @@ export type PanelSectionTabRenderer = (panel: PanelSectionPanelDefinition) => Re
 
 export type PanelSectionContentRenderer = (panel: PanelSectionPanelDefinition) => ReactNode;
 
+export type PanelSectionPresentationPolicy = (panel: PanelSectionPanelDefinition) => boolean;
+
+export type PanelSectionContentReadyResolver = (panel: PanelSectionPanelDefinition) => boolean;
+
 const PANEL_BAR_HYSTERESIS_PX = 8;
 const PANEL_BAR_CONTENT_BOUNDARY_HYSTERESIS_PX = 10;
 
@@ -179,6 +183,8 @@ export function PanelSection(props: {
     allowContentPreview?: boolean;
     renderPanelTab?: PanelSectionTabRenderer;
     renderPanelContent?: PanelSectionContentRenderer;
+    deferPanelContentPresentation?: PanelSectionPresentationPolicy;
+    isPanelContentReady?: PanelSectionContentReadyResolver;
     onDragSessionChange?: (session: PanelSectionDragSession | null) => void;
     onDragSessionEnd?: (session: PanelSectionDragSession) => void;
     onActivityDragSessionChange?: (session: ActivityBarDragSession | null) => void;
@@ -200,6 +206,8 @@ export function PanelSection(props: {
         allowContentPreview = false,
         renderPanelTab,
         renderPanelContent,
+        deferPanelContentPresentation,
+        isPanelContentReady,
         onDragSessionChange,
         onActivityDragSessionChange,
         onActivatePanel,
@@ -241,6 +249,32 @@ export function PanelSection(props: {
     }
 
     const activePanel = panelSection.panels.find((panel) => panel.id === panelSection.focusedPanelId) ?? null;
+    const isPanelReadyForPresentation = (panel: PanelSectionPanelDefinition): boolean => {
+        if (!(deferPanelContentPresentation?.(panel) ?? false)) {
+            return true;
+        }
+
+        return isPanelContentReady?.(panel) ?? false;
+    };
+    const initialCommittedPanelId = activePanel && isPanelReadyForPresentation(activePanel)
+        ? activePanel.id
+        : null;
+    const [committedPanelId, setCommittedPanelId] = useState<string | null>(initialCommittedPanelId);
+    const committedPanel = committedPanelId
+        ? panelSection.panels.find((panel) => panel.id === committedPanelId) ?? null
+        : null;
+    const isActivePanelReadyForPresentation = activePanel
+        ? isPanelReadyForPresentation(activePanel)
+        : false;
+    const visiblePanelId = isActivePanelReadyForPresentation
+        ? activePanel?.id ?? null
+        : committedPanel?.id ?? null;
+    const pendingPanelId = activePanel && !isActivePanelReadyForPresentation
+        ? activePanel.id
+        : null;
+    const renderedContentPanels = panelSection.panels.filter((panel) => (
+        panel.id === visiblePanelId || panel.id === pendingPanelId
+    ));
     const hasPanels = panelSection.panels.length > 0;
     const shouldRenderBar = hasPanels || !hideBarWhenEmpty;
     const draggingPanelId = dragSession?.phase === "dragging" && dragSession.currentPanelSectionId === panelSection.id
@@ -254,6 +288,19 @@ export function PanelSection(props: {
         dragSession &&
         !panelSection.panels.some((panel) => panel.id === dragSession.panelId),
     );
+
+    useLayoutEffect(() => {
+        if (activePanel && isPanelReadyForPresentation(activePanel)) {
+            if (committedPanelId !== activePanel.id) {
+                setCommittedPanelId(activePanel.id);
+            }
+            return;
+        }
+
+        if (committedPanelId && !panelSection.panels.some((panel) => panel.id === committedPanelId)) {
+            setCommittedPanelId(null);
+        }
+    }, [activePanel?.id, committedPanelId, deferPanelContentPresentation, isPanelContentReady, panelSection.panels]);
 
     useEffect(() => {
         const isDragging = dragSession?.phase === "dragging" || activityDragSession?.phase === "dragging";
@@ -735,6 +782,8 @@ export function PanelSection(props: {
                         "data-layout-role": "panel-content",
                         "data-layout-panel-section-id": panelSection.id,
                         "data-layout-panel-id": activePanel?.id,
+                        "data-layout-presented-panel-id": visiblePanelId ?? undefined,
+                        "data-layout-pending-panel-id": pendingPanelId ?? undefined,
                     },
                     focusBridge?.getContentAttributes?.(panelSection, activePanel),
                 )}
@@ -745,25 +794,46 @@ export function PanelSection(props: {
                 ].filter(Boolean).join(" ")}
             >
                 <div className="layout-v2-panel-section__content-inner">
-                    {activePanel ? (
-                        <div className={["layout-v2-panel-section__pane", getPanelToneClassName(activePanel.tone)].join(" ")}>
+                    {renderedContentPanels.length > 0 ? renderedContentPanels.map((panel) => {
+                        const isVisible = panel.id === visiblePanelId;
+                        const isPending = panel.id === pendingPanelId;
+
+                        return (
                             <div
-                                className="layout-v2-panel-section__pane-header"
-                                {...(focusBridge?.getHeaderAttributes?.(panelSection, activePanel) ?? {})}
+                                key={panel.id}
+                                aria-hidden={!isVisible}
+                                data-layout-presentation-state={isVisible ? "committed" : isPending ? "pending" : "inactive"}
+                                className={[
+                                    "layout-v2-panel-section__pane",
+                                    getPanelToneClassName(panel.tone),
+                                    isVisible
+                                        ? "layout-v2-panel-section__pane--active"
+                                        : "layout-v2-panel-section__pane--inactive",
+                                    isPending ? "layout-v2-panel-section__pane--pending" : "",
+                                ].filter(Boolean).join(" ")}
                             >
-                                <span className="layout-v2-panel-section__pane-symbol">{activePanel.symbol}</span>
-                                <span className="layout-v2-panel-section__pane-title">{activePanel.label}</span>
+                                <div
+                                    className="layout-v2-panel-section__pane-header"
+                                    {...(focusBridge?.getHeaderAttributes?.(panelSection, panel) ?? {})}
+                                >
+                                    <span className="layout-v2-panel-section__pane-symbol">{panel.symbol}</span>
+                                    <span className="layout-v2-panel-section__pane-title">{panel.label}</span>
+                                </div>
+                                <div className="layout-v2-panel-section__pane-body">
+                                    {renderPanelContent ? renderPanelContent(panel) : panel.content}
+                                </div>
                             </div>
-                            <div className="layout-v2-panel-section__pane-body">
-                                {renderPanelContent ? renderPanelContent(activePanel) : activePanel.content}
-                            </div>
-                        </div>
-                    ) : (
+                        );
+                    }) : null}
+                    {!visiblePanelId && pendingPanelId ? (
+                        <div className="layout-v2-panel-section__presentation-pending" aria-live="polite">Preparing panel</div>
+                    ) : null}
+                    {renderedContentPanels.length === 0 && !pendingPanelId ? (
                         <div
                             className="layout-v2-panel-section__empty-pane"
                             {...(focusBridge?.getEmptyAttributes?.(panelSection) ?? {})}
                         >{shouldRenderBar ? "Drop panel here or pick one from the bar" : "Drop panel here"}</div>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>

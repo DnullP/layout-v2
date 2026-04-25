@@ -1169,4 +1169,93 @@ describe("workbench panel layout snapshot persistence", () => {
         .filter((panel) => panel.id === "backlinks"),
     ).toHaveLength(1);
   });
+
+    test("panel layout snapshots must not restore polluted main tab splits", () => {
+      const baseState = createWorkbenchLayoutState({
+        activities,
+        panels,
+        hasRightSidebar: true,
+        initialTabs: [
+          { id: "home", title: "Home", component: "home" },
+        ],
+      });
+
+      const rootWithTabSplit = splitSectionTree(baseState.root, "main-tabs", "horizontal", {
+        ratio: 0.5,
+        first: {
+          id: "main-tabs-section",
+          title: "Main Tabs",
+          data: {
+            role: "main",
+            component: createSectionComponentBinding("tab-section", { tabSectionId: "main-tabs" }),
+          },
+        },
+        second: {
+          id: "main-tabs-split",
+          title: "Network Segment",
+          data: {
+            role: "main",
+            component: createSectionComponentBinding("tab-section", { tabSectionId: "main-tabs-tabs" }),
+          },
+        },
+      });
+
+      const exportedSnapshot = exportWorkbenchPanelLayoutSnapshot({
+        ...baseState,
+        root: rootWithTabSplit,
+      });
+      expect(findSectionNode(exportedSnapshot.root, "main-tabs")?.split).toBeNull();
+      expect(findSectionNode(exportedSnapshot.root, "main-tabs-split")).toBeNull();
+
+      const legacyPollutedSnapshot = {
+        ...exportedSnapshot,
+        root: rootWithTabSplit,
+      };
+      const restoredState = applyWorkbenchPanelLayoutSnapshot(baseState, legacyPollutedSnapshot);
+
+      expect(findSectionNode(restoredState.root, "main-tabs")?.split).toBeNull();
+      expect(findSectionNode(restoredState.root, "main-tabs-split")).toBeNull();
+      expect(Object.keys(restoredState.tabSections.sections)).toEqual(["main-tabs"]);
+      expect(restoredState.tabSections.sections["main-tabs"]?.tabs.map((tab) => tab.id)).toEqual(["home"]);
+    });
+
+    test("panel layout snapshots must reject extra tab section leaves", () => {
+      const baseState = createWorkbenchLayoutState({
+        activities,
+        panels,
+        hasRightSidebar: true,
+        initialTabs: [
+          { id: "home", title: "Home", component: "home" },
+        ],
+      });
+
+      const pollutedRoot = splitSectionTree(baseState.root, "right-sidebar", "vertical", {
+        ratio: 0.5,
+        first: {
+          id: "right-sidebar-section",
+          title: "Right Sidebar",
+          data: {
+            role: "sidebar",
+            component: createSectionComponentBinding("panel-section", { panelSectionId: "right-panel-section" }),
+          },
+        },
+        second: {
+          id: "right-sidebar-tab-pollution",
+          title: "Uncontrolled Tab Section",
+          data: {
+            role: "main",
+            component: createSectionComponentBinding("tab-section", { tabSectionId: "right-sidebar-tab-pollution" }),
+          },
+        },
+      });
+      const cleanSnapshot = exportWorkbenchPanelLayoutSnapshot(baseState);
+      const restoredState = applyWorkbenchPanelLayoutSnapshot(baseState, {
+        ...cleanSnapshot,
+        root: pollutedRoot,
+      });
+
+      expect(findSectionNode(restoredState.root, "right-sidebar-tab-pollution")).toBeNull();
+      expect(findSectionNode(restoredState.root, "right-sidebar")?.split).toBeNull();
+      expect(Object.keys(restoredState.tabSections.sections)).toEqual(["main-tabs"]);
+    });
 });

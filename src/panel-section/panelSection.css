@@ -119,6 +119,7 @@
 }
 
 .layout-v2-panel-section__content-inner {
+    position: relative;
     width: 100%;
     height: 100%;
     min-width: 0;
@@ -126,6 +127,8 @@
 }
 
 .layout-v2-panel-section__pane {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     min-width: 0;
@@ -136,7 +139,29 @@
     padding: 14px 16px;
     border: 1px solid var(--chrome-border-soft);
     border-radius: 14px;
+    box-sizing: border-box;
     background: color-mix(in srgb, var(--bg-secondary) 92%, white 8%);
+}
+
+/* 已提交 pane：当前对用户可见并接收交互的 panel 内容。 */
+.layout-v2-panel-section__pane--active {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+/* 非可见 pane：保留挂载与尺寸计算，但避免在提交前露出内容。 */
+.layout-v2-panel-section__pane--inactive {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* pending pane：等待内部组件完成首开 ready 的 panel 内容。 */
+.layout-v2-panel-section__pane--pending {
+    z-index: 0;
 }
 
 .layout-v2-panel-section__pane--neutral {
@@ -199,6 +224,19 @@
     border-radius: 14px;
     color: var(--text-secondary);
     background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+}
+
+/* 首开提交占位：没有已提交 pane 时短暂承接等待 ready 的状态。 */
+.layout-v2-panel-section__presentation-pending {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--chrome-border-soft) 76%, transparent);
+    border-radius: 14px;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
 }
 
 /* 拖拽预览：跟随指针显示当前被拖动的 panel tab icon。 */
