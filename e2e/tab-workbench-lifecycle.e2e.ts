@@ -278,6 +278,26 @@ test.describe("tab workbench lifecycle", () => {
         expect(sections[0]?.titles).toEqual([TAB_REVIEW, TAB_METRICS]);
     });
 
+    test("closing the left main-tabs child after the first right split should destroy that section", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+        await page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]')
+            .locator('.layout-v2-tab-section__tab-close[aria-label="Close Metrics"]')
+            .click();
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        await createRightSideSplit(page, TAB_REVIEW);
+
+        await page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]')
+            .locator('.layout-v2-tab-section__tab-close[aria-label="Close Welcome"]')
+            .click();
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        const sections = await readTabSections(page);
+        expect(sections).toHaveLength(1);
+        expect(sections[0]?.id).not.toBe("main-tabs");
+        expect(sections[0]?.titles).toEqual([TAB_REVIEW]);
+    });
+
     test("preview should switch from right split to top split when a stronger vertical zone is entered", async ({ page }) => {
         await gotoLayoutV2Example(page);
 

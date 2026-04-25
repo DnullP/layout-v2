@@ -139,4 +139,74 @@ describe("closeWorkbenchTabState", () => {
         expect(result.nextState.tabSections.sections[WORKBENCH_MAIN_TAB_SECTION_ID]?.tabs.map((tab) => tab.id)).toEqual(["review"]);
         expect(result.nextState.workbench?.activeGroupId).toBe(WORKBENCH_MAIN_TAB_SECTION_ID);
     });
+
+    test("closing the left main-tabs child after the first right split should destroy that section", () => {
+        const initialState = createWorkbenchLayoutState({
+            initialTabs: [
+                {
+                    id: "welcome",
+                    title: "Welcome",
+                    component: "welcome-page",
+                },
+                {
+                    id: "review",
+                    title: "Review",
+                    component: "review-page",
+                },
+            ],
+        });
+
+        const committed = commitTabWorkbenchDrop(
+            initialState.root,
+            initialState.tabSections,
+            {
+                sourceTabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                currentTabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                sourceLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                currentLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                tabId: "review",
+                title: "Review",
+                content: "Component: review-page",
+                pointerId: 1,
+                originX: 0,
+                originY: 0,
+                pointerX: 10,
+                pointerY: 10,
+                phase: "dragging",
+                hoverTarget: {
+                    area: "content",
+                    leafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    anchorLeafSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    tabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID,
+                    splitSide: "right",
+                    contentBounds: {
+                        left: 0,
+                        top: 0,
+                        right: 300,
+                        bottom: 200,
+                        width: 300,
+                        height: 200,
+                    },
+                },
+            },
+            workbenchTabAdapter,
+        );
+
+        expect(committed).not.toBeNull();
+        expect(Object.keys(committed!.state.sections)).toHaveLength(2);
+        expect(committed!.state.sections[WORKBENCH_MAIN_TAB_SECTION_ID]?.tabs.map((tab) => tab.id)).toEqual(["welcome"]);
+
+        const result = closeWorkbenchTabState({
+            ...initialState,
+            root: committed!.root,
+            tabSections: committed!.state,
+            workbench: { activeGroupId: WORKBENCH_MAIN_TAB_SECTION_ID },
+        }, "welcome");
+
+        expect(result.didClose).toBe(true);
+        expect(result.nextState.tabSections.sections[WORKBENCH_MAIN_TAB_SECTION_ID]).toBeUndefined();
+        const remainingSection = Object.values(result.nextState.tabSections.sections)[0];
+        expect(remainingSection?.tabs.map((tab) => tab.id)).toEqual(["review"]);
+        expect(result.nextState.workbench?.activeGroupId).toBe(remainingSection?.id ?? null);
+    });
 });

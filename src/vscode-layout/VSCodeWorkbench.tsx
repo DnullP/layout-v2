@@ -282,8 +282,14 @@ export function closeWorkbenchTabState(
         ? (nextTabs[nextTabs.length - 1]?.id ?? null)
         : section.focusedTabId;
     const nextSection = { ...section, tabs: nextTabs, focusedTabId: nextFocusedTabId };
+    const hasOtherTabSections = Object.keys(currentState.tabSections.sections)
+        .some((sectionId) => sectionId !== sourceSectionId);
 
-    if (sourceSectionId === WORKBENCH_MAIN_TAB_SECTION_ID && nextTabs.length === 0) {
+    if (
+        sourceSectionId === WORKBENCH_MAIN_TAB_SECTION_ID &&
+        nextTabs.length === 0 &&
+        !hasOtherTabSections
+    ) {
         return {
             didClose: true,
             nextState: {
