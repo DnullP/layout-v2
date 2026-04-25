@@ -273,6 +273,8 @@ export function TabSection(props: {
   contentRegistry?: TabSectionContentRendererRegistry;
   renderTabContent?: TabSectionContentRenderer;
   renderTabTitle?: TabSectionTitleRenderer;
+  renderInactiveTabContent?: boolean;
+  preserveActiveTabContentDuringDrag?: boolean;
   onDragSessionChange?: (session: TabSectionDragSession | null) => void;
   onDragSessionEnd?: (session: TabSectionDragSession) => void;
   onFocusTab: (tabId: string) => void;
@@ -292,6 +294,8 @@ export function TabSection(props: {
     contentRegistry,
     renderTabContent,
     renderTabTitle,
+    renderInactiveTabContent = true,
+    preserveActiveTabContentDuringDrag = false,
     onDragSessionChange,
     onDragSessionEnd,
     onFocusTab,
@@ -346,6 +350,15 @@ export function TabSection(props: {
     activeCard.id === dragSession.tabId,
   );
   const visibleCardId = shouldHideActiveCard ? null : activeCard?.id ?? null;
+  const preservedDraggingCardId = shouldHideActiveCard && preserveActiveTabContentDuringDrag
+    ? activeCard?.id ?? null
+    : null;
+  const renderedCardId = visibleCardId ?? preservedDraggingCardId;
+  const renderedContentTabs = renderInactiveTabContent
+    ? tabSection.tabs
+    : renderedCardId
+      ? tabSection.tabs.filter((tab) => tab.id === renderedCardId)
+      : [];
 
   useEffect(() => {
     if (!trackPointerLifecycle || !dragSession || !tabSection.tabs.some((tab) => tab.id === dragSession.tabId)) {
@@ -766,8 +779,8 @@ export function TabSection(props: {
           }
         }}
       >
-        {visibleCardId ? (
-          tabSection.tabs.map((tab) => {
+        {renderedCardId ? (
+          renderedContentTabs.map((tab) => {
             const isVisible = tab.id === visibleCardId;
 
             return (

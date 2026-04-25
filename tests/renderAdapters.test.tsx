@@ -94,6 +94,81 @@ describe("render adapters", () => {
         expect(tabMarkup).toContain("layout-v2-tab-section__card--active");
     });
 
+    test("关闭非激活 tab 内容渲染时应只挂载当前 focused tab", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "welcome", title: "Welcome", content: "Welcome page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                renderInactiveTabContent={false}
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).not.toContain('data-host-tab-content="welcome"');
+        expect(tabMarkup).toContain('data-host-tab-content="guide"');
+        expect(tabMarkup).not.toContain("layout-v2-tab-section__card--inactive");
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--active");
+    });
+
+    test("拖拽 active tab 时可保留其内容挂载但隐藏", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "welcome", title: "Welcome", content: "Welcome page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                dragSession={{
+                    sourceTabSectionId: "main-tabs",
+                    currentTabSectionId: "main-tabs",
+                    sourceLeafSectionId: "main",
+                    currentLeafSectionId: "main",
+                    tabId: "guide",
+                    title: "Guide",
+                    content: "Guide page",
+                    pointerId: 1,
+                    originX: 100,
+                    originY: 100,
+                    pointerX: 160,
+                    pointerY: 140,
+                    phase: "dragging",
+                    hoverTarget: null,
+                }}
+                renderInactiveTabContent={false}
+                preserveActiveTabContentDuringDrag
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).toContain('data-host-tab-content="guide"');
+        expect(tabMarkup).not.toContain('data-host-tab-content="welcome"');
+        expect(tabMarkup).toContain("layout-v2-tab-section__card--inactive");
+        expect(tabMarkup).not.toContain("layout-v2-tab-section__empty-card");
+    });
+
     test("应支持在空 panel section 时隐藏 panel bar", () => {
         const panelMarkup = renderToStaticMarkup(
             <PanelSection

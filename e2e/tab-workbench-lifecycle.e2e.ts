@@ -115,19 +115,16 @@ async function dragTabToSectionContentSide(
     await dragLocatorToPoint(page, sourceTab, targetX, targetY);
 }
 
-async function getProjectedMergeCenter(
-    sourceSection: Locator,
-    targetSection: Locator,
-): Promise<{ x: number; y: number }> {
-    const sourceBounds = await sourceSection.boundingBox();
-    const targetBounds = await targetSection.boundingBox();
-    if (!sourceBounds || !targetBounds) {
-        throw new Error("getProjectedMergeCenter: section bounds missing");
+async function getSectionContentCenter(targetSection: Locator): Promise<{ x: number; y: number }> {
+    const targetContent = targetSection.locator(".layout-v2-tab-section__content").first();
+    const targetBounds = await targetContent.boundingBox();
+    if (!targetBounds) {
+        throw new Error("getSectionContentCenter: target content bounds missing");
     }
 
     return {
-        x: (Math.min(sourceBounds.x, targetBounds.x) + Math.max(sourceBounds.x + sourceBounds.width, targetBounds.x + targetBounds.width)) / 2,
-        y: (Math.min(sourceBounds.y, targetBounds.y) + Math.max(sourceBounds.y + sourceBounds.height, targetBounds.y + targetBounds.height)) / 2,
+        x: targetBounds.x + targetBounds.width / 2,
+        y: targetBounds.y + targetBounds.height / 2,
     };
 }
 
@@ -220,7 +217,7 @@ test.describe("tab workbench lifecycle", () => {
         }).first();
         const targetSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
         const sourceTab = sourceSection.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_WELCOME }).first();
-        const mergeCenter = await getProjectedMergeCenter(sourceSection, targetSection);
+        const mergeCenter = await getSectionContentCenter(targetSection);
 
         await movePointerWithoutDrop(page, sourceTab, mergeCenter.x, mergeCenter.y);
 
@@ -240,7 +237,7 @@ test.describe("tab workbench lifecycle", () => {
         }).first();
         const targetSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
         const sourceTab = sourceSection.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_WELCOME }).first();
-        const mergeCenter = await getProjectedMergeCenter(sourceSection, targetSection);
+        const mergeCenter = await getSectionContentCenter(targetSection);
 
         await dragLocatorToPoint(page, sourceTab, mergeCenter.x, mergeCenter.y);
 
