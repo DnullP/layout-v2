@@ -6,6 +6,7 @@
 
 import {
     createRootSection,
+    findSectionNode,
     setSectionHidden,
     splitSectionTree,
     SECTION_FIXED_SIZE_META_KEY,
@@ -14,11 +15,13 @@ import {
 } from "../section/layoutModel";
 import {
     createSectionComponentBinding,
+    getSectionComponentBinding,
     type SectionComponentBinding,
     type SectionComponentData,
 } from "../section/sectionComponent";
 import { createActivityBarState, type ActivityBarsState, type ActivityBarIconDefinition } from "../activity-bar/activityBarModel";
 import { createVSCodeLayoutState, type VSCodeLayoutState } from "./store";
+import { createPanelSectionsState } from "../panel-section/panelSectionModel";
 import type { TabSectionTabDefinition } from "../tab-section/tabSectionModel";
 import type { PanelSectionPanelDefinition, PanelSectionStateItem } from "../panel-section/panelSectionModel";
 import type { WorkbenchActivityDefinition, WorkbenchPanelDefinition, WorkbenchTabDefinition } from "./workbenchTypes";
@@ -268,6 +271,223 @@ export interface CreateWorkbenchLayoutOptions {
     initialSidebarState?: {
         left?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
         right?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
+    };
+}
+
+/**
+ * @interface WorkbenchPanelSectionLayoutSnapshot
+ * @description 可序列化的 panel section 拓扑快照；只保存 panel id，不保存 React icon / content 节点。
+ * @field id panel section 标识。
+ * @field panelIds 当前 section 内 panel 顺序。
+ * @field focusedPanelId 当前聚焦 panel。
+ * @field isCollapsed 当前 section 是否折叠。
+ * @field isRoot 是否为 root panel section。
+ */
+export interface WorkbenchPanelSectionLayoutSnapshot {
+    /** panel section 标识。 */
+    id: string;
+    /** 当前 section 内 panel 顺序。 */
+    panelIds: string[];
+    /** 当前聚焦 panel。 */
+    focusedPanelId: string | null;
+    /** 当前 section 是否折叠。 */
+    isCollapsed: boolean;
+    /** 是否为 root panel section。 */
+    isRoot?: boolean;
+}
+
+/**
+ * @interface WorkbenchPanelLayoutSnapshot
+ * @description 可序列化的 panel split 布局快照，用于恢复侧栏 panel icon split 拓扑。
+ * @field root section tree 根节点。
+ * @field sections panel section 拓扑与 panel 顺序。
+ */
+export interface WorkbenchPanelLayoutSnapshot {
+    /** section tree 根节点。 */
+    root: SectionNode<WorkbenchSectionData>;
+    /** panel section 拓扑与 panel 顺序。 */
+    sections: WorkbenchPanelSectionLayoutSnapshot[];
+}
+
+function cloneSectionNode<T>(node: SectionNode<T>): SectionNode<T> {
+    return {
+        ...node,
+        data: { ...(node.data as object) } as T,
+        resizableEdges: { ...node.resizableEdges },
+        meta: node.meta ? { ...node.meta } : undefined,
+        split: node.split
+            ? {
+                  direction: node.split.direction,
+                  ratio: node.split.ratio,
+                  children: [
+                      cloneSectionNode(node.split.children[0]),
+                      cloneSectionNode(node.split.children[1]),
+                  ],
+              }
+            : null,
+    };
+}
+
+function collectPanelSectionIds(root: SectionNode<WorkbenchSectionData>): Set<string> {
+    const ids = new Set<string>();
+    const queue: SectionNode<WorkbenchSectionData>[] = [root];
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+            continue;
+        }
+
+        if (current.split) {
+            queue.push(current.split.children[0], current.split.children[1]);
+            continue;
+        }
+
+        const binding = getSectionComponentBinding(current);
+        if (binding.type !== "panel-section") {
+            continue;
+        }
+
+        const panelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
+        if (typeof panelSectionId === "string" && panelSectionId.trim()) {
+            ids.add(panelSectionId);
+        }
+    }
+
+    return ids;
+}
+
+function buildPanelDefinitionById(
+    state: VSCodeLayoutState<WorkbenchSectionData>,
+): Map<string, PanelSectionPanelDefinition> {
+    const definitions = new Map<string, PanelSectionPanelDefinition>();
+    for (const section of Object.values(state.panelSections.sections)) {
+        for (const panel of section.panels) {
+            definitions.set(panel.id, panel);
+        }
+    }
+    return definitions;
+}
+
+/**
+ * @function exportWorkbenchPanelLayoutSnapshot
+ * @description 从当前 workbench 状态导出可序列化 panel split 快照。
+ * @param state 当前 workbench 布局状态。
+ * @returns panel split 快照。
+ */
+export function exportWorkbenchPanelLayoutSnapshot(
+    state: VSCodeLayoutState<WorkbenchSectionData>,
+): WorkbenchPanelLayoutSnapshot {
+    return {
+        root: cloneSectionNode(state.root),
+        sections: Object.values(state.panelSections.sections).map((section) => ({
+            id: section.id,
+            panelIds: section.panels.map((panel) => panel.id),
+            focusedPanelId: section.focusedPanelId,
+            isCollapsed: section.isCollapsed,
+            isRoot: section.isRoot,
+        })),
+    };
+}
+
+/**
+ * @function applyWorkbenchPanelLayoutSnapshot
+ * @description 将持久化 panel split 快照套用到当前声明式 workbench 状态。
+ * @param state 当前声明式 workbench 状态，提供最新 panel 定义与 icon 元数据。
+ * @param snapshot 待恢复的 panel split 快照。
+ * @returns 恢复后的 workbench 状态；快照非法时返回原状态。
+ */
+export function applyWorkbenchPanelLayoutSnapshot(
+    state: VSCodeLayoutState<WorkbenchSectionData>,
+    snapshot: WorkbenchPanelLayoutSnapshot | null | undefined,
+): VSCodeLayoutState<WorkbenchSectionData> {
+    if (!snapshot) {
+        return state;
+    }
+
+    const root = cloneSectionNode(snapshot.root);
+    if (!findSectionNode(root, WORKBENCH_LEFT_PANEL_SECTION_ID) && !findSectionNode(root, "left-sidebar")) {
+        return state;
+    }
+
+    const panelSectionIds = collectPanelSectionIds(root);
+    if (!panelSectionIds.has(WORKBENCH_LEFT_PANEL_SECTION_ID)) {
+        return state;
+    }
+
+    const panelDefinitionById = buildPanelDefinitionById(state);
+    const usedPanelIds = new Set<string>();
+    const restoredSections = new Map<string, PanelSectionStateItem>();
+
+    for (const sectionSnapshot of snapshot.sections) {
+        if (!panelSectionIds.has(sectionSnapshot.id)) {
+            continue;
+        }
+
+        const panels = sectionSnapshot.panelIds
+            .map((panelId) => panelDefinitionById.get(panelId) ?? null)
+            .filter((panel): panel is PanelSectionPanelDefinition => panel !== null);
+
+        panels.forEach((panel) => usedPanelIds.add(panel.id));
+        restoredSections.set(sectionSnapshot.id, {
+            id: sectionSnapshot.id,
+            panels,
+            focusedPanelId: panels.some((panel) => panel.id === sectionSnapshot.focusedPanelId)
+                ? sectionSnapshot.focusedPanelId
+                : (panels[0]?.id ?? null),
+            isCollapsed: sectionSnapshot.isCollapsed,
+            isRoot: sectionSnapshot.isRoot,
+        });
+    }
+
+    for (const [sectionId, baseSection] of Object.entries(state.panelSections.sections)) {
+        if (!panelSectionIds.has(sectionId)) {
+            continue;
+        }
+
+        const missingPanels = baseSection.panels.filter((panel) => !usedPanelIds.has(panel.id));
+        const restoredSection = restoredSections.get(sectionId);
+        if (!restoredSection) {
+            restoredSections.set(sectionId, {
+                ...baseSection,
+                panels: missingPanels,
+                focusedPanelId: missingPanels.some((panel) => panel.id === baseSection.focusedPanelId)
+                    ? baseSection.focusedPanelId
+                    : (missingPanels[0]?.id ?? null),
+            });
+            missingPanels.forEach((panel) => usedPanelIds.add(panel.id));
+            continue;
+        }
+
+        if (missingPanels.length > 0) {
+            const panels = [...restoredSection.panels, ...missingPanels];
+            restoredSections.set(sectionId, {
+                ...restoredSection,
+                panels,
+                focusedPanelId: panels.some((panel) => panel.id === restoredSection.focusedPanelId)
+                    ? restoredSection.focusedPanelId
+                    : (panels[0]?.id ?? null),
+            });
+            missingPanels.forEach((panel) => usedPanelIds.add(panel.id));
+        }
+    }
+
+    for (const panelSectionId of panelSectionIds) {
+        if (!restoredSections.has(panelSectionId)) {
+            restoredSections.set(panelSectionId, {
+                id: panelSectionId,
+                panels: [],
+                focusedPanelId: null,
+                isCollapsed: false,
+                isRoot: panelSectionId === WORKBENCH_LEFT_PANEL_SECTION_ID,
+            });
+        }
+    }
+
+    return {
+        ...state,
+        root,
+        panelSections: createPanelSectionsState(Array.from(restoredSections.values())),
     };
 }
 

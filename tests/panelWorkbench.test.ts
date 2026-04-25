@@ -8,6 +8,9 @@ import {
   createRootSection,
   createSectionComponentBinding,
   createPanelSectionsState,
+  createWorkbenchLayoutState,
+  exportWorkbenchPanelLayoutSnapshot,
+  applyWorkbenchPanelLayoutSnapshot,
   finalizePanelWorkbenchDrop,
   findSectionNode,
   movePanelSectionPanel,
@@ -17,6 +20,7 @@ import {
   WORKBENCH_RIGHT_PANEL_SECTION_ID,
   type SectionComponentData,
   type SectionDraft,
+  type WorkbenchSectionData,
   type PanelSectionDragSession,
   type PanelSectionHoverTarget,
   type WorkbenchActivityDefinition,
@@ -81,6 +85,21 @@ function createDragSession(overrides: Partial<PanelSectionDragSession> = {}): Pa
     phase: "dragging",
     hoverTarget: null,
     ...overrides,
+  };
+}
+
+function createWorkbenchPanelDraft(
+  id: string,
+  title: string,
+  panelSectionId: string,
+): SectionDraft<WorkbenchSectionData> {
+  return {
+    id,
+    title,
+    data: {
+      role: "sidebar",
+      component: createSectionComponentBinding("panel-section", { panelSectionId }),
+    },
   };
 }
 
@@ -1064,5 +1083,90 @@ describe("panel drag-split duplication regression", () => {
       (s) => s.id === WORKBENCH_RIGHT_PANEL_SECTION_ID,
     )!;
     expect(rebuiltRight.panels.map((p) => p.id)).toEqual(["outline", "ai-chat", "backlinks"]);
+  });
+});
+
+describe("workbench panel layout snapshot persistence", () => {
+  const activities: WorkbenchActivityDefinition[] = [
+    { id: "files", label: "Files", bar: "left", section: "top" },
+    { id: "outline", label: "Outline", bar: "right", section: "top" },
+    { id: "ai-chat", label: "AI Chat", bar: "right", section: "top" },
+  ];
+
+  const panels: WorkbenchPanelDefinition[] = [
+    { id: "files", label: "Files", activityId: "files", position: "left", order: 1 },
+    { id: "outline", label: "Outline", activityId: "outline", position: "right", order: 1 },
+    { id: "backlinks", label: "Backlinks", activityId: "outline", position: "right", order: 2 },
+    { id: "ai-chat", label: "AI Chat", activityId: "ai-chat", position: "right", order: 1 },
+  ];
+
+  test("panel icon split topology can be exported and restored without duplicating panels", () => {
+    const baseState = createWorkbenchLayoutState({
+      activities,
+      panels,
+      hasRightSidebar: true,
+      initialSidebarState: {
+        left: { visible: true, activeActivityId: "files", activePanelId: "files" },
+        right: { visible: true, activeActivityId: "outline", activePanelId: "outline" },
+      },
+    });
+
+    const rightSection = baseState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]!;
+    const leftSection = baseState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]!;
+    const outlinePanel = rightSection.panels.find((panel) => panel.id === "outline")!;
+    const aiChatPanel = rightSection.panels.find((panel) => panel.id === "ai-chat")!;
+    const backlinksPanel = rightSection.panels.find((panel) => panel.id === "backlinks")!;
+
+    const splitRoot = splitSectionTree(baseState.root, "right-sidebar", "vertical", {
+      ratio: 0.5,
+      first: createWorkbenchPanelDraft(
+        "right-sidebar-section",
+        "Right Sidebar",
+        WORKBENCH_RIGHT_PANEL_SECTION_ID,
+      ),
+      second: createWorkbenchPanelDraft(
+        "right-sidebar-split",
+        "Right Sidebar Split",
+        "right-sidebar-panels",
+      ),
+    });
+
+    const splitState = {
+      ...baseState,
+      root: splitRoot,
+      panelSections: createPanelSectionsState([
+        leftSection,
+        {
+          id: WORKBENCH_RIGHT_PANEL_SECTION_ID,
+          panels: [outlinePanel, aiChatPanel],
+          focusedPanelId: "outline",
+          isCollapsed: false,
+        },
+        {
+          id: "right-sidebar-panels",
+          panels: [backlinksPanel],
+          focusedPanelId: "backlinks",
+          isCollapsed: false,
+        },
+      ]),
+    };
+
+    const snapshot = exportWorkbenchPanelLayoutSnapshot(splitState);
+    const restoredState = applyWorkbenchPanelLayoutSnapshot(baseState, snapshot);
+    const restoredRightNode = findSectionNode(restoredState.root, "right-sidebar");
+
+    expect(restoredRightNode?.split?.direction).toBe("vertical");
+    expect(restoredState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]?.panels.map((panel) => panel.id)).toEqual([
+      "outline",
+      "ai-chat",
+    ]);
+    expect(restoredState.panelSections.sections["right-sidebar-panels"]?.panels.map((panel) => panel.id)).toEqual([
+      "backlinks",
+    ]);
+    expect(
+      Object.values(restoredState.panelSections.sections)
+        .flatMap((section) => section.panels)
+        .filter((panel) => panel.id === "backlinks"),
+    ).toHaveLength(1);
   });
 });

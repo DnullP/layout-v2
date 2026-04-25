@@ -28,6 +28,8 @@ export {
     buildWorkbenchActivityBars,
     buildWorkbenchPanelSections,
     buildWorkbenchTabs,
+    applyWorkbenchPanelLayoutSnapshot,
+    exportWorkbenchPanelLayoutSnapshot,
     readWorkbenchTabPayload,
     WORKBENCH_MAIN_TAB_SECTION_ID,
     WORKBENCH_LEFT_ACTIVITY_BAR_ID,
@@ -37,6 +39,8 @@ export {
     type WorkbenchSectionData,
     type WorkbenchSectionRole,
     type WorkbenchTabPayload,
+    type WorkbenchPanelLayoutSnapshot,
+    type WorkbenchPanelSectionLayoutSnapshot,
     type CreateWorkbenchLayoutOptions,
 } from "./workbenchPreset";
 

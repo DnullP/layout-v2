@@ -63,11 +63,14 @@ import {
     buildWorkbenchPanelSections,
     createWorkbenchLayoutState,
     createWorkbenchRootLayout,
+    applyWorkbenchPanelLayoutSnapshot,
+    exportWorkbenchPanelLayoutSnapshot,
     readWorkbenchTabPayload,
     WORKBENCH_MAIN_TAB_SECTION_ID,
     WORKBENCH_LEFT_ACTIVITY_BAR_ID,
     WORKBENCH_LEFT_PANEL_SECTION_ID,
     WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    type WorkbenchPanelLayoutSnapshot,
 } from "./workbenchPreset";
 import type { ActivityBarFocusBridge } from "./focusBridge";
 import type { PanelSectionFocusBridge } from "./focusBridge";
@@ -131,6 +134,8 @@ export interface VSCodeWorkbenchProps {
     initialSidebarState?: WorkbenchSidebarState;
     /** 初始 section 分割比例（sectionId → ratio）。 */
     initialSectionRatios?: Record<string, number>;
+    /** 初始 panel split 布局快照，用于恢复 panel icon split 拓扑。 */
+    initialPanelLayoutSnapshot?: WorkbenchPanelLayoutSnapshot | null;
     /** 空 panel section 是否隐藏 panel bar。 */
     hideEmptyPanelBar?: boolean;
     /** 是否渲染非激活 tab 内容。默认开启以保留通用宿主的缓存行为。 */
@@ -174,6 +179,8 @@ export interface VSCodeWorkbenchProps {
     onActivityBarBackgroundContextMenu?: (event: { clientX: number; clientY: number }) => void;
     /** section 分割比例变化回调（用于持久化）。 */
     onSectionRatioChange?: (ratios: Record<string, number>) => void;
+    /** panel split 布局变化回调（用于持久化）。 */
+    onPanelLayoutChange?: (snapshot: WorkbenchPanelLayoutSnapshot) => void;
 
     /** 命令式 API ref。 */
     apiRef?: Ref<WorkbenchApi | null>;
@@ -469,6 +476,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         hasRightSidebar = false,
         initialSidebarState,
         initialSectionRatios,
+        initialPanelLayoutSnapshot,
         hideEmptyPanelBar = false,
         renderInactiveTabContent = true,
         renderTabDragPreviewLayout = true,
@@ -488,6 +496,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onActivityIconDrop,
         onActivityBarBackgroundContextMenu,
         onSectionRatioChange,
+        onPanelLayoutChange,
         apiRef,
         className,
     } = props;
@@ -539,8 +548,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Store ---
     const storeRef = useRef<VSCodeLayoutStore<WorkbenchSectionData> | null>(null);
     if (!storeRef.current) {
-        storeRef.current = createVSCodeLayoutStore({
-            initialState: createWorkbenchLayoutState({
+        const initialState = applyWorkbenchPanelLayoutSnapshot(
+            createWorkbenchLayoutState({
                 activities,
                 panels,
                 initialTabs,
@@ -558,6 +567,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     },
                 } : undefined,
             }),
+            initialPanelLayoutSnapshot,
+        );
+
+        storeRef.current = createVSCodeLayoutStore({
+            initialState,
         });
         // Apply persisted section ratios (fire-and-forget, must run before first render)
         if (initialSectionRatios) {
@@ -589,6 +603,16 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
     }, [initialSectionRatios, store]);
 
+    const initialPanelLayoutAppliedRef = useRef(!!initialPanelLayoutSnapshot);
+    useEffect(() => {
+        if (!initialPanelLayoutAppliedRef.current && initialPanelLayoutSnapshot) {
+            initialPanelLayoutAppliedRef.current = true;
+            store.updateState((currentState) => {
+                return applyWorkbenchPanelLayoutSnapshot(currentState, initialPanelLayoutSnapshot);
+            });
+        }
+    }, [initialPanelLayoutSnapshot, store]);
+
     // --- Section ratio change notification ---
     const onSectionRatioChangeRef = useRef(onSectionRatioChange);
     onSectionRatioChangeRef.current = onSectionRatioChange;
@@ -597,6 +621,25 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             if (event.command === "resize-section" && event.phase === "after" && event.changed) {
                 onSectionRatioChangeRef.current?.(collectSectionRatios(event.nextState.root));
             }
+        });
+    }, [store]);
+
+    const onPanelLayoutChangeRef = useRef(onPanelLayoutChange);
+    onPanelLayoutChangeRef.current = onPanelLayoutChange;
+    useEffect(() => {
+        return store.addLifecycleHook((event) => {
+            if (event.phase !== "after" || !event.changed) {
+                return;
+            }
+
+            if (
+                event.state.root === event.nextState.root &&
+                event.state.panelSections === event.nextState.panelSections
+            ) {
+                return;
+            }
+
+            onPanelLayoutChangeRef.current?.(exportWorkbenchPanelLayoutSnapshot(event.nextState));
         });
     }, [store]);
 
@@ -927,7 +970,13 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     }, [hasRightSidebar, rightSidebarVisible, store]);
 
     // --- Sync root layout when sidebar config changes ---
+    const rootLayoutSyncInitializedRef = useRef(false);
     useEffect(() => {
+        if (!rootLayoutSyncInitializedRef.current) {
+            rootLayoutSyncInitializedRef.current = true;
+            return;
+        }
+
         store.resetLayout(createWorkbenchRootLayout(hasRightSidebar));
     }, [hasRightSidebar, store]);
 
