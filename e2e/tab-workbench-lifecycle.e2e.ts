@@ -24,6 +24,12 @@ async function gotoLayoutV2Example(page: Page): Promise<void> {
     await page.locator(".layout-v2-tab-section").first().waitFor({ state: "visible" });
 }
 
+async function waitForNextAnimationFrame(page: Page): Promise<void> {
+    await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+    }));
+}
+
 async function dragLocatorToPoint(
     page: Page,
     locator: Locator,
@@ -127,6 +133,19 @@ async function getProjectedMergeCenter(
 
 async function createRightSideSplit(page: Page, tabTitle: string = TAB_WELCOME): Promise<void> {
     await dragTabToSectionContentSide(page, tabTitle, "main-tabs", "right");
+}
+
+async function createLeftSideSplit(page: Page, tabTitle: string = TAB_WELCOME): Promise<void> {
+    const sourceTab = page.locator(".layout-v2-tab-section__tab-main", {
+        hasText: tabTitle,
+    }).first();
+    const targetContent = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"] .layout-v2-tab-section__content').first();
+    const bounds = await targetContent.boundingBox();
+    if (!bounds) {
+        throw new Error(`createLeftSideSplit: target bounds missing for main-tabs`);
+    }
+
+    await dragLocatorToPoint(page, sourceTab, bounds.x + 14, bounds.y + bounds.height / 2);
 }
 
 test.describe("tab workbench lifecycle", () => {
@@ -242,6 +261,75 @@ test.describe("tab workbench lifecycle", () => {
         const sections = await readTabSections(page);
         expect(sections).toHaveLength(1);
         expect(sections[0]?.titles).toEqual([TAB_REVIEW, TAB_METRICS]);
+    });
+
+    test("closing the lone left child after the first left split should destroy that section", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+        await createLeftSideSplit(page);
+
+        await page.locator('.layout-v2-tab-section', {
+            has: page.locator('.layout-v2-tab-section__tab-title', { hasText: TAB_WELCOME }),
+        }).first().locator('.layout-v2-tab-section__tab-close[aria-label="Close Welcome"]').click();
+        await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
+
+        const sections = await readTabSections(page);
+        expect(sections).toHaveLength(1);
+        expect(sections[0]?.id).toBe("main-tabs");
+        expect(sections[0]?.titles).toEqual([TAB_REVIEW, TAB_METRICS]);
+    });
+
+    test("preview should switch from right split to top split when a stronger vertical zone is entered", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const sourceTab = page.locator(".layout-v2-tab-section__tab-main", { hasText: TAB_WELCOME }).first();
+        const targetContent = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"] .layout-v2-tab-section__content').first();
+        const targetBounds = await targetContent.boundingBox();
+        if (!targetBounds) {
+            throw new Error("preview switch target bounds missing");
+        }
+
+        const startBounds = await sourceTab.boundingBox();
+        if (!startBounds) {
+            throw new Error("preview switch source bounds missing");
+        }
+
+        await page.mouse.move(startBounds.x + startBounds.width / 2, startBounds.y + startBounds.height / 2);
+        await page.mouse.down();
+
+        await page.mouse.move(
+            targetBounds.x + targetBounds.width * 0.78,
+            targetBounds.y + targetBounds.height / 2,
+            { steps: 12 },
+        );
+        await waitForNextAnimationFrame(page);
+
+        const rightPreviewSections = await readTabSections(page);
+        expect(rightPreviewSections).toHaveLength(2);
+        const rightMainSection = rightPreviewSections.find((section) => section.id === "main-tabs");
+        const rightPreviewSection = rightPreviewSections.find((section) => section.titles.includes(TAB_WELCOME));
+        expect(rightMainSection).toBeTruthy();
+        expect(rightPreviewSection).toBeTruthy();
+        expect(rightPreviewSection!.rect.left).toBeGreaterThan((rightMainSection?.rect.left ?? 0) + 40);
+        expect(Math.abs((rightPreviewSection?.rect.top ?? 0) - (rightMainSection?.rect.top ?? 9999))).toBeLessThan(12);
+
+        await page.mouse.move(
+            targetBounds.x + targetBounds.width * 0.78,
+            targetBounds.y + targetBounds.height * 0.08,
+            { steps: 12 },
+        );
+        await waitForNextAnimationFrame(page);
+
+        const topPreviewSections = await readTabSections(page);
+        expect(topPreviewSections).toHaveLength(2);
+        const topMainSection = topPreviewSections.find((section) => section.id === "main-tabs");
+        const topPreviewSection = topPreviewSections.find((section) => section.titles.includes(TAB_WELCOME));
+        expect(topMainSection).toBeTruthy();
+        expect(topPreviewSection).toBeTruthy();
+        expect(Math.abs((topPreviewSection?.rect.left ?? 0) - (topMainSection?.rect.left ?? 9999))).toBeLessThan(12);
+        expect((topPreviewSection?.rect.top ?? 0)).toBeLessThan((topMainSection?.rect.top ?? 0) + 20);
+        expect((topMainSection?.rect.top ?? 0)).toBeGreaterThan((topPreviewSection?.rect.top ?? 0) + 40);
+
+        await page.mouse.up();
     });
 
     test("nested partition commit should create a lower-right third section", async ({ page }) => {

@@ -36,6 +36,108 @@ type PreviewSplitSideValue<TSplitSides extends PreviewSplitSideMap<string>> = No
 >;
 
 const DEFAULT_PREVIEW_SPLIT_HYSTERESIS_PX = 10;
+const DEFAULT_PREVIEW_SPLIT_SWITCH_SCORE_EPSILON = 0.05;
+
+function resolvePreviewSplitScore(
+    rect: DOMRect | PreviewStableBounds,
+    pointerX: number,
+    pointerY: number,
+    side: "left" | "right" | "top" | "bottom",
+    entryHysteresisPx: number,
+): number | null {
+    const leftThreshold = rect.left + rect.width / 3;
+    const rightThreshold = rect.right - rect.width / 3;
+    const topThreshold = rect.top + rect.height / 3;
+    const bottomThreshold = rect.bottom - rect.height / 3;
+
+    if (side === "left") {
+        const activation = leftThreshold - entryHysteresisPx;
+        if (pointerX > activation) {
+            return null;
+        }
+
+        return (activation - pointerX) / Math.max(leftThreshold - rect.left, 1);
+    }
+
+    if (side === "right") {
+        const activation = rightThreshold + entryHysteresisPx;
+        if (pointerX < activation) {
+            return null;
+        }
+
+        return (pointerX - activation) / Math.max(rect.right - rightThreshold, 1);
+    }
+
+    if (side === "top") {
+        const activation = topThreshold - entryHysteresisPx;
+        if (pointerY > activation) {
+            return null;
+        }
+
+        return (activation - pointerY) / Math.max(topThreshold - rect.top, 1);
+    }
+
+    const activation = bottomThreshold + entryHysteresisPx;
+    if (pointerY < activation) {
+        return null;
+    }
+
+    return (pointerY - activation) / Math.max(rect.bottom - bottomThreshold, 1);
+}
+
+function collectPreviewSplitCandidates<const TSplitSides extends PreviewSplitSideMap<string>>(
+    rect: DOMRect | PreviewStableBounds,
+    pointerX: number,
+    pointerY: number,
+    splitSides: TSplitSides,
+    entryHysteresisPx: number,
+): Array<{
+    side: PreviewSplitSideValue<TSplitSides>;
+    score: number;
+}> {
+    const candidates: Array<{
+        side: PreviewSplitSideValue<TSplitSides>;
+        score: number;
+    }> = [];
+
+    const pushCandidate = (
+        side: PreviewSplitSideValue<TSplitSides> | undefined,
+        score: number | null,
+    ): void => {
+        if (!side || score === null) {
+            return;
+        }
+
+        candidates.push({ side, score });
+    };
+
+    pushCandidate(
+        splitSides.left as PreviewSplitSideValue<TSplitSides> | undefined,
+        splitSides.left
+            ? resolvePreviewSplitScore(rect, pointerX, pointerY, "left", entryHysteresisPx)
+            : null,
+    );
+    pushCandidate(
+        splitSides.right as PreviewSplitSideValue<TSplitSides> | undefined,
+        splitSides.right
+            ? resolvePreviewSplitScore(rect, pointerX, pointerY, "right", entryHysteresisPx)
+            : null,
+    );
+    pushCandidate(
+        splitSides.top as PreviewSplitSideValue<TSplitSides> | undefined,
+        splitSides.top
+            ? resolvePreviewSplitScore(rect, pointerX, pointerY, "top", entryHysteresisPx)
+            : null,
+    );
+    pushCandidate(
+        splitSides.bottom as PreviewSplitSideValue<TSplitSides> | undefined,
+        splitSides.bottom
+            ? resolvePreviewSplitScore(rect, pointerX, pointerY, "bottom", entryHysteresisPx)
+            : null,
+    );
+
+    return candidates;
+}
 
 function shouldRetainPreviewSplitSide<const TSplitSides extends PreviewSplitSideMap<string>>(
     rect: DOMRect | PreviewStableBounds,
@@ -162,35 +264,64 @@ export function resolvePreviewSplitSide<const TSplitSides extends PreviewSplitSi
         hysteresisPx?: number;
     } = {},
 ): PreviewSplitSideValue<TSplitSides> | null {
-    const leftThreshold = rect.left + rect.width / 3;
-    const rightThreshold = rect.right - rect.width / 3;
-    const topThreshold = rect.top + rect.height / 3;
-    const bottomThreshold = rect.bottom - rect.height / 3;
-
     const hysteresisPx = Math.max(0, options.hysteresisPx ?? DEFAULT_PREVIEW_SPLIT_HYSTERESIS_PX);
-    if (shouldRetainPreviewSplitSide(rect, pointerX, pointerY, splitSides, options.currentSplitSide, hysteresisPx)) {
-        return options.currentSplitSide;
-    }
-
     const entryHysteresisPx = options.currentSplitSide ? 0 : hysteresisPx;
+    const candidates = collectPreviewSplitCandidates(
+        rect,
+        pointerX,
+        pointerY,
+        splitSides,
+        entryHysteresisPx,
+    );
+    const bestCandidate = candidates.reduce<{
+        side: PreviewSplitSideValue<TSplitSides>;
+        score: number;
+    } | null>((best, candidate) => {
+        if (!best || candidate.score > best.score) {
+            return candidate;
+        }
 
-    if (splitSides.left && pointerX <= leftThreshold - entryHysteresisPx) {
-        return splitSides.left as PreviewSplitSideValue<TSplitSides>;
+        return best;
+    }, null);
+
+    if (options.currentSplitSide) {
+        const currentCandidate = candidates.find((candidate) => candidate.side === options.currentSplitSide) ?? null;
+        if (currentCandidate) {
+            const bestOtherCandidate = candidates.reduce<{
+                side: PreviewSplitSideValue<TSplitSides>;
+                score: number;
+            } | null>((best, candidate) => {
+                if (candidate.side === options.currentSplitSide) {
+                    return best;
+                }
+
+                if (!best || candidate.score > best.score) {
+                    return candidate;
+                }
+
+                return best;
+            }, null);
+
+            if (
+                bestOtherCandidate &&
+                bestOtherCandidate.score > currentCandidate.score + DEFAULT_PREVIEW_SPLIT_SWITCH_SCORE_EPSILON
+            ) {
+                return bestOtherCandidate.side;
+            }
+
+            return options.currentSplitSide;
+        }
+
+        if (bestCandidate) {
+            return bestCandidate.side;
+        }
+
+        if (shouldRetainPreviewSplitSide(rect, pointerX, pointerY, splitSides, options.currentSplitSide, hysteresisPx)) {
+            return options.currentSplitSide;
+        }
     }
 
-    if (splitSides.right && pointerX >= rightThreshold + entryHysteresisPx) {
-        return splitSides.right as PreviewSplitSideValue<TSplitSides>;
-    }
-
-    if (splitSides.top && pointerY <= topThreshold - entryHysteresisPx) {
-        return splitSides.top as PreviewSplitSideValue<TSplitSides>;
-    }
-
-    if (splitSides.bottom && pointerY >= bottomThreshold + entryHysteresisPx) {
-        return splitSides.bottom as PreviewSplitSideValue<TSplitSides>;
-    }
-
-    return null;
+    return bestCandidate?.side ?? null;
 }
 
 export function arePreviewHoverTargetsEqual<TTarget extends PreviewHoverTargetBase>(

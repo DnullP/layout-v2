@@ -135,6 +135,26 @@ describe("previewSession", () => {
         )).toBeNull();
     });
 
+    test("当新 split side 更强时应撤销旧 preview 并切换到新方向", () => {
+        const bounds = createBounds();
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            230,
+            10,
+            { left: "left", right: "right", top: "top", bottom: "bottom" },
+            { currentSplitSide: "right" },
+        )).toBe("top");
+
+        expect(resolvePreviewSplitSide(
+            bounds,
+            230,
+            170,
+            { left: "left", right: "right", top: "top", bottom: "bottom" },
+            { currentSplitSide: "right" },
+        )).toBe("bottom");
+    });
+
     test("应支持公共 anchor 解析和 hover target 比较", () => {
         const left: TestHoverTarget = {
             area: "content",
