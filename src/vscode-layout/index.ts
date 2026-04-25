@@ -12,7 +12,7 @@
 
 // --- 高层 API：声明式 Workbench ---
 export { VSCodeWorkbench } from "./VSCodeWorkbench";
-export type { VSCodeWorkbenchProps } from "./VSCodeWorkbench";
+export type { TabDragPreviewContentRenderContext, VSCodeWorkbenchProps } from "./VSCodeWorkbench";
 export type {
     WorkbenchActivityDefinition,
     WorkbenchPanelDefinition,
