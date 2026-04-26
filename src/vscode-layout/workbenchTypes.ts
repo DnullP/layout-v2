@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from "react";
+import type { WorkbenchLayoutSnapshot } from "./workbenchPreset";
 
 /**
  * 声明式 activity 定义。
@@ -115,6 +116,8 @@ export interface WorkbenchApi {
     getTab: (tabId: string) => { id: string; params: Record<string, unknown> } | null;
     /** 获取所有 tab 的信息列表。 */
     getTabs: () => Array<{ id: string; params: Record<string, unknown> }>;
+    /** 导出当前工作区主布局快照。 */
+    exportLayoutSnapshot: () => WorkbenchLayoutSnapshot;
     /** 设置左侧边栏可见性。 */
     setLeftSidebarVisible: (visible: boolean) => void;
     /** 设置右侧边栏可见性。 */

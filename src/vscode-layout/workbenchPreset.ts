@@ -22,7 +22,7 @@ import {
 import { createActivityBarState, type ActivityBarsState, type ActivityBarIconDefinition } from "../activity-bar/activityBarModel";
 import { createVSCodeLayoutState, type VSCodeLayoutState } from "./store";
 import { createPanelSectionsState } from "../panel-section/panelSectionModel";
-import type { TabSectionTabDefinition } from "../tab-section/tabSectionModel";
+import { createTabSectionsState, type TabSectionStateItem, type TabSectionTabDefinition } from "../tab-section/tabSectionModel";
 import type { PanelSectionPanelDefinition, PanelSectionStateItem } from "../panel-section/panelSectionModel";
 import type { WorkbenchActivityDefinition, WorkbenchPanelDefinition, WorkbenchTabDefinition } from "./workbenchTypes";
 
@@ -310,6 +310,44 @@ export interface WorkbenchPanelLayoutSnapshot {
 }
 
 /**
+ * @interface WorkbenchTabSectionLayoutSnapshot
+ * @description 可序列化的主工作区 tab section 快照。
+ * @field id tab section 标识。
+ * @field tabs 当前 section 内 tab 顺序。
+ * @field focusedTabId 当前聚焦 tab。
+ * @field isRoot 是否为 root tab section。
+ */
+export interface WorkbenchTabSectionLayoutSnapshot {
+    /** tab section 标识。 */
+    id: string;
+    /** 当前 section 内 tab 顺序。 */
+    tabs: WorkbenchTabDefinition[];
+    /** 当前聚焦 tab。 */
+    focusedTabId: string | null;
+    /** 是否为 root tab section。 */
+    isRoot?: boolean;
+}
+
+/**
+ * @interface WorkbenchLayoutSnapshot
+ * @description 可序列化的工作区主布局快照，覆盖主编辑区 tab 拓扑与打开的 tab。
+ * @field version 快照版本。
+ * @field root section tree 根节点。
+ * @field tabSections 主编辑区 tab section 拓扑与 tab 顺序。
+ * @field activeGroupId 当前活跃 tab section。
+ */
+export interface WorkbenchLayoutSnapshot {
+    /** 快照版本。 */
+    version: 1;
+    /** section tree 根节点。 */
+    root: SectionNode<WorkbenchSectionData>;
+    /** 主编辑区 tab section 拓扑与 tab 顺序。 */
+    tabSections: WorkbenchTabSectionLayoutSnapshot[];
+    /** 当前活跃 tab section。 */
+    activeGroupId: string | null;
+}
+
+/**
  * @function clonePanelLayoutSectionNode
  * @description 克隆 panel layout 快照用 section tree，并折叠 tab-section split，避免 panelLayout 持久化主编辑区 tab 拓扑。
  * @param node 待克隆 section 节点。
@@ -343,6 +381,37 @@ function clonePanelLayoutSectionNode(node: SectionNode<WorkbenchSectionData>): S
                 clonePanelLayoutSectionNode(node.split.children[1]),
             ],
         },
+    };
+}
+
+/**
+ * @function cloneWorkbenchLayoutSectionNode
+ * @description 克隆完整工作区 section tree，保留主编辑区 tab split 拓扑。
+ * @param node 待克隆 section 节点。
+ * @returns 可序列化 section tree 节点。
+ */
+function cloneWorkbenchLayoutSectionNode(node: SectionNode<WorkbenchSectionData>): SectionNode<WorkbenchSectionData> {
+    return {
+        ...node,
+        data: {
+            ...node.data,
+            component: {
+                type: node.data.component.type,
+                props: { ...node.data.component.props },
+            } as WorkbenchSectionData["component"],
+        },
+        resizableEdges: { ...node.resizableEdges },
+        meta: node.meta ? { ...node.meta } : undefined,
+        split: node.split
+            ? {
+                  direction: node.split.direction,
+                  ratio: node.split.ratio,
+                  children: [
+                      cloneWorkbenchLayoutSectionNode(node.split.children[0]),
+                      cloneWorkbenchLayoutSectionNode(node.split.children[1]),
+                  ],
+              }
+            : null,
     };
 }
 
@@ -421,6 +490,41 @@ function buildPanelDefinitionById(
     return definitions;
 }
 
+function toWorkbenchTabDefinition(tab: TabSectionTabDefinition): WorkbenchTabDefinition {
+    const payload = readWorkbenchTabPayload(tab);
+    return {
+        id: tab.id,
+        title: tab.title,
+        component: payload.component,
+        params: { ...payload.params },
+    };
+}
+
+function normalizeWorkbenchLayoutTab(value: unknown): WorkbenchTabDefinition | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+
+    const tab = value as Partial<WorkbenchTabDefinition>;
+    const id = typeof tab.id === "string" ? tab.id.trim() : "";
+    const title = typeof tab.title === "string" ? tab.title : id;
+    const component = typeof tab.component === "string" ? tab.component.trim() : "";
+    const params = tab.params && typeof tab.params === "object" && !Array.isArray(tab.params)
+        ? tab.params as Record<string, unknown>
+        : undefined;
+
+    if (!id || !component) {
+        return null;
+    }
+
+    return {
+        id,
+        title,
+        component,
+        params,
+    };
+}
+
 /**
  * @function exportWorkbenchPanelLayoutSnapshot
  * @description 从当前 workbench 状态导出可序列化 panel split 快照。
@@ -439,6 +543,28 @@ export function exportWorkbenchPanelLayoutSnapshot(
             isCollapsed: section.isCollapsed,
             isRoot: section.isRoot,
         })),
+    };
+}
+
+/**
+ * @function exportWorkbenchLayoutSnapshot
+ * @description 从当前 workbench 状态导出主工作区布局快照。
+ * @param state 当前 workbench 布局状态。
+ * @returns 工作区布局快照。
+ */
+export function exportWorkbenchLayoutSnapshot(
+    state: VSCodeLayoutState<WorkbenchSectionData>,
+): WorkbenchLayoutSnapshot {
+    return {
+        version: 1,
+        root: cloneWorkbenchLayoutSectionNode(state.root),
+        tabSections: Object.values(state.tabSections.sections).map((section) => ({
+            id: section.id,
+            tabs: section.tabs.map(toWorkbenchTabDefinition),
+            focusedTabId: section.focusedTabId,
+            isRoot: section.isRoot,
+        })),
+        activeGroupId: state.workbench?.activeGroupId ?? null,
     };
 }
 
@@ -545,6 +671,91 @@ export function applyWorkbenchPanelLayoutSnapshot(
         ...state,
         root,
         panelSections: createPanelSectionsState(Array.from(restoredSections.values())),
+    };
+}
+
+/**
+ * @function applyWorkbenchLayoutSnapshot
+ * @description 将持久化工作区主布局快照套用到当前声明式 workbench 状态。
+ * @param state 当前声明式 workbench 状态。
+ * @param snapshot 待恢复的工作区布局快照。
+ * @returns 恢复后的 workbench 状态；快照非法或与当前侧栏能力不兼容时返回原状态。
+ */
+export function applyWorkbenchLayoutSnapshot(
+    state: VSCodeLayoutState<WorkbenchSectionData>,
+    snapshot: WorkbenchLayoutSnapshot | null | undefined,
+): VSCodeLayoutState<WorkbenchSectionData> {
+    if (!snapshot || snapshot.version !== 1) {
+        return state;
+    }
+
+    const root = cloneWorkbenchLayoutSectionNode(snapshot.root);
+    const currentHasRightSidebar = Boolean(findSectionNode(state.root, "right-sidebar"));
+    const snapshotHasRightSidebar = Boolean(findSectionNode(root, "right-sidebar"));
+    if (currentHasRightSidebar !== snapshotHasRightSidebar) {
+        return state;
+    }
+
+    if (!findSectionNode(root, WORKBENCH_LEFT_ACTIVITY_BAR_ID) || !findSectionNode(root, "left-sidebar")) {
+        return state;
+    }
+
+    const tabSectionIds = collectTabSectionIds(root);
+    if (!tabSectionIds.has(WORKBENCH_MAIN_TAB_SECTION_ID)) {
+        return state;
+    }
+
+    const restoredSections: TabSectionStateItem[] = [];
+    const seenSectionIds = new Set<string>();
+    const tabSectionSnapshots = Array.isArray(snapshot.tabSections) ? snapshot.tabSections : [];
+    for (const sectionSnapshot of tabSectionSnapshots) {
+        const id = typeof sectionSnapshot.id === "string" ? sectionSnapshot.id.trim() : "";
+        if (!id || !tabSectionIds.has(id) || seenSectionIds.has(id)) {
+            continue;
+        }
+
+        const tabs = Array.isArray(sectionSnapshot.tabs)
+            ? sectionSnapshot.tabs
+                  .map((tab) => normalizeWorkbenchLayoutTab(tab))
+                  .filter((tab): tab is WorkbenchTabDefinition => tab !== null)
+            : [];
+        const focusedTabId = typeof sectionSnapshot.focusedTabId === "string" &&
+            tabs.some((tab) => tab.id === sectionSnapshot.focusedTabId)
+            ? sectionSnapshot.focusedTabId
+            : (tabs[0]?.id ?? null);
+
+        restoredSections.push({
+            id,
+            tabs: buildWorkbenchTabs(tabs),
+            focusedTabId,
+            isRoot: sectionSnapshot.isRoot === true || id === WORKBENCH_MAIN_TAB_SECTION_ID,
+        });
+        seenSectionIds.add(id);
+    }
+
+    for (const tabSectionId of tabSectionIds) {
+        if (seenSectionIds.has(tabSectionId)) {
+            continue;
+        }
+
+        restoredSections.push({
+            id: tabSectionId,
+            tabs: [],
+            focusedTabId: null,
+            isRoot: tabSectionId === WORKBENCH_MAIN_TAB_SECTION_ID,
+        });
+    }
+
+    const activeGroupId = typeof snapshot.activeGroupId === "string" &&
+        tabSectionIds.has(snapshot.activeGroupId)
+        ? snapshot.activeGroupId
+        : WORKBENCH_MAIN_TAB_SECTION_ID;
+
+    return {
+        ...state,
+        root,
+        tabSections: createTabSectionsState(restoredSections),
+        workbench: { activeGroupId },
     };
 }
 

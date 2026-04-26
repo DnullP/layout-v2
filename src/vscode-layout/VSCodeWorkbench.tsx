@@ -64,13 +64,16 @@ import {
     buildWorkbenchPanelSections,
     createWorkbenchLayoutState,
     createWorkbenchRootLayout,
+    applyWorkbenchLayoutSnapshot,
     applyWorkbenchPanelLayoutSnapshot,
+    exportWorkbenchLayoutSnapshot,
     exportWorkbenchPanelLayoutSnapshot,
     readWorkbenchTabPayload,
     WORKBENCH_MAIN_TAB_SECTION_ID,
     WORKBENCH_LEFT_ACTIVITY_BAR_ID,
     WORKBENCH_LEFT_PANEL_SECTION_ID,
     WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    type WorkbenchLayoutSnapshot,
     type WorkbenchPanelLayoutSnapshot,
 } from "./workbenchPreset";
 import type { ActivityBarFocusBridge } from "./focusBridge";
@@ -137,6 +140,8 @@ export interface VSCodeWorkbenchProps {
     initialSectionRatios?: Record<string, number>;
     /** 初始 panel split 布局快照，用于恢复 panel icon split 拓扑。 */
     initialPanelLayoutSnapshot?: WorkbenchPanelLayoutSnapshot | null;
+    /** 初始工作区主布局快照，用于恢复主编辑区 tab split 与打开的 tab。 */
+    initialLayoutSnapshot?: WorkbenchLayoutSnapshot | null;
     /** 空 panel section 是否隐藏 panel bar。 */
     hideEmptyPanelBar?: boolean;
     /** 是否渲染非激活 tab 内容。默认开启以保留通用宿主的缓存行为；函数形式可按 tab 细分。 */
@@ -186,6 +191,8 @@ export interface VSCodeWorkbenchProps {
     onSectionRatioChange?: (ratios: Record<string, number>) => void;
     /** panel split 布局变化回调（用于持久化）。 */
     onPanelLayoutChange?: (snapshot: WorkbenchPanelLayoutSnapshot) => void;
+    /** 工作区主布局变化回调（用于持久化）。 */
+    onLayoutSnapshotChange?: (snapshot: WorkbenchLayoutSnapshot) => void;
 
     /** 命令式 API ref。 */
     apiRef?: Ref<WorkbenchApi | null>;
@@ -482,6 +489,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         initialSidebarState,
         initialSectionRatios,
         initialPanelLayoutSnapshot,
+        initialLayoutSnapshot,
         hideEmptyPanelBar = false,
         renderInactiveTabContent = true,
         deferTabContentPresentation,
@@ -504,6 +512,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onActivityBarBackgroundContextMenu,
         onSectionRatioChange,
         onPanelLayoutChange,
+        onLayoutSnapshotChange,
         apiRef,
         className,
     } = props;
@@ -583,27 +592,26 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Store ---
     const storeRef = useRef<VSCodeLayoutStore<WorkbenchSectionData> | null>(null);
     if (!storeRef.current) {
-        const initialState = applyWorkbenchPanelLayoutSnapshot(
-            createWorkbenchLayoutState({
-                activities,
-                panels,
-                initialTabs,
-                hasRightSidebar,
-                initialSidebarState: initialSidebarState ? {
-                    left: {
-                        visible: initialSidebarState.left.visible,
-                        activeActivityId: initialSidebarState.left.activeActivityId,
-                        activePanelId: initialSidebarState.left.activePanelId,
-                    },
-                    right: {
-                        visible: initialSidebarState.right.visible,
-                        activeActivityId: initialSidebarState.right.activeActivityId,
-                        activePanelId: initialSidebarState.right.activePanelId,
-                    },
-                } : undefined,
-            }),
-            initialPanelLayoutSnapshot,
-        );
+        let initialState = createWorkbenchLayoutState({
+            activities,
+            panels,
+            initialTabs,
+            hasRightSidebar,
+            initialSidebarState: initialSidebarState ? {
+                left: {
+                    visible: initialSidebarState.left.visible,
+                    activeActivityId: initialSidebarState.left.activeActivityId,
+                    activePanelId: initialSidebarState.left.activePanelId,
+                },
+                right: {
+                    visible: initialSidebarState.right.visible,
+                    activeActivityId: initialSidebarState.right.activeActivityId,
+                    activePanelId: initialSidebarState.right.activePanelId,
+                },
+            } : undefined,
+        });
+        initialState = applyWorkbenchPanelLayoutSnapshot(initialState, initialPanelLayoutSnapshot);
+        initialState = applyWorkbenchLayoutSnapshot(initialState, initialLayoutSnapshot);
 
         storeRef.current = createVSCodeLayoutStore({
             initialState,
@@ -735,6 +743,22 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
     }, [initialPanelLayoutSnapshot, store]);
 
+    const initialLayoutSnapshotAppliedRef = useRef(!!initialLayoutSnapshot);
+    useEffect(() => {
+        if (!initialLayoutSnapshotAppliedRef.current && initialLayoutSnapshot) {
+            let didApply = false;
+            initialLayoutSnapshotAppliedRef.current = true;
+            store.updateState((currentState) => {
+                const nextState = applyWorkbenchLayoutSnapshot(currentState, initialLayoutSnapshot);
+                didApply = nextState !== currentState;
+                return nextState;
+            });
+            if (!didApply) {
+                initialLayoutSnapshotAppliedRef.current = false;
+            }
+        }
+    }, [hasRightSidebar, initialLayoutSnapshot, store]);
+
     // --- Section ratio change notification ---
     const onSectionRatioChangeRef = useRef(onSectionRatioChange);
     onSectionRatioChangeRef.current = onSectionRatioChange;
@@ -762,6 +786,26 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             }
 
             onPanelLayoutChangeRef.current?.(exportWorkbenchPanelLayoutSnapshot(event.nextState));
+        });
+    }, [store]);
+
+    const onLayoutSnapshotChangeRef = useRef(onLayoutSnapshotChange);
+    onLayoutSnapshotChangeRef.current = onLayoutSnapshotChange;
+    useEffect(() => {
+        return store.addLifecycleHook((event) => {
+            if (event.phase !== "after" || !event.changed) {
+                return;
+            }
+
+            if (
+                event.state.root === event.nextState.root &&
+                event.state.tabSections === event.nextState.tabSections &&
+                event.state.workbench === event.nextState.workbench
+            ) {
+                return;
+            }
+
+            onLayoutSnapshotChangeRef.current?.(exportWorkbenchLayoutSnapshot(event.nextState));
         });
     }, [store]);
 
@@ -1216,6 +1260,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             }
             return result;
         },
+        exportLayoutSnapshot: () => exportWorkbenchLayoutSnapshot(store.getState()),
         setLeftSidebarVisible,
         setRightSidebarVisible,
     }), [openTab, updateTab, closeTab, setActiveTab, activatePanelById, store]);
@@ -1435,7 +1480,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 !tabSection?.id.startsWith(PREVIEW_TAB_SECTION_ID_PREFIX),
             );
 
-            if (!tabSection || tabSection.tabs.length === 0) {
+            if (!tabSection) {
                 return (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", opacity: 0.5, fontSize: 12 }}>
                         No open tabs

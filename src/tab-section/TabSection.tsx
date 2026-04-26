@@ -888,7 +888,7 @@ export function TabSection(props: {
           <div className="layout-v2-tab-section__presentation-pending" aria-live="polite">Preparing content</div>
         ) : null}
         {renderedContentTabs.length === 0 && !pendingCardId ? (
-          <div className="layout-v2-tab-section__empty-card">Drop tab or focus another tab</div>
+          <div className="layout-v2-tab-section__empty-card">No open tabs</div>
         ) : null}
       </div>
     </div>
