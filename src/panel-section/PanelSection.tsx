@@ -256,19 +256,12 @@ export function PanelSection(props: {
 
         return isPanelContentReady?.(panel) ?? false;
     };
-    const initialCommittedPanelId = activePanel && isPanelReadyForPresentation(activePanel)
-        ? activePanel.id
-        : null;
-    const [committedPanelId, setCommittedPanelId] = useState<string | null>(initialCommittedPanelId);
-    const committedPanel = committedPanelId
-        ? panelSection.panels.find((panel) => panel.id === committedPanelId) ?? null
-        : null;
     const isActivePanelReadyForPresentation = activePanel
         ? isPanelReadyForPresentation(activePanel)
         : false;
     const visiblePanelId = isActivePanelReadyForPresentation
         ? activePanel?.id ?? null
-        : committedPanel?.id ?? null;
+        : null;
     const pendingPanelId = activePanel && !isActivePanelReadyForPresentation
         ? activePanel.id
         : null;
@@ -288,20 +281,6 @@ export function PanelSection(props: {
         dragSession &&
         !panelSection.panels.some((panel) => panel.id === dragSession.panelId),
     );
-
-    useLayoutEffect(() => {
-        if (activePanel && isPanelReadyForPresentation(activePanel)) {
-            if (committedPanelId !== activePanel.id) {
-                setCommittedPanelId(activePanel.id);
-            }
-            return;
-        }
-
-        if (committedPanelId && !panelSection.panels.some((panel) => panel.id === committedPanelId)) {
-            setCommittedPanelId(null);
-        }
-    }, [activePanel?.id, committedPanelId, deferPanelContentPresentation, isPanelContentReady, panelSection.panels]);
-
     useEffect(() => {
         const isDragging = dragSession?.phase === "dragging" || activityDragSession?.phase === "dragging";
         document.body.classList.toggle("layout-v2--dragging", isDragging);
@@ -453,17 +432,23 @@ export function PanelSection(props: {
                 dragSession.hoverTarget?.panelSectionId !== panelSection.id ||
                 dragSession.hoverTarget?.area !== "bar"
             ) {
-                onMovePanel({
-                    sourceSectionId: dragSession.currentPanelSectionId,
-                    targetSectionId: panelSection.id,
-                    panelId: dragSession.panelId,
-                    targetIndex,
-                });
+                if (dragSession.currentPanelSectionId === panelSection.id) {
+                    onMovePanel({
+                        sourceSectionId: dragSession.currentPanelSectionId,
+                        targetSectionId: panelSection.id,
+                        panelId: dragSession.panelId,
+                        targetIndex,
+                    });
+                }
                 updateDragSession({
                     ...dragSession,
                     activityTarget: null,
-                    currentPanelSectionId: panelSection.id,
-                    currentLeafSectionId: leafSectionId,
+                    currentPanelSectionId: dragSession.currentPanelSectionId === panelSection.id
+                        ? panelSection.id
+                        : dragSession.currentPanelSectionId,
+                    currentLeafSectionId: dragSession.currentPanelSectionId === panelSection.id
+                        ? leafSectionId
+                        : dragSession.currentLeafSectionId,
                     hoverTarget: nextTarget,
                 });
             }

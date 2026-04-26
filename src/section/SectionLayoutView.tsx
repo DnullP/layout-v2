@@ -382,7 +382,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
     }
 
     if (!node.split) {
-        return <Section sectionId={node.id}>{renderSection(node)}</Section>;
+        return <Section key={node.id} sectionId={node.id}>{renderSection(node)}</Section>;
     }
 
     const [firstChild, secondChild] = node.split.children;

@@ -10,6 +10,8 @@ import {
   createPanelSectionsState,
   createWorkbenchLayoutState,
   exportWorkbenchPanelLayoutSnapshot,
+  exportWorkbenchLayoutSnapshot,
+  applyWorkbenchLayoutSnapshot,
   applyWorkbenchPanelLayoutSnapshot,
   finalizePanelWorkbenchDrop,
   findSectionNode,
@@ -1168,6 +1170,91 @@ describe("workbench panel layout snapshot persistence", () => {
         .flatMap((section) => section.panels)
         .filter((panel) => panel.id === "backlinks"),
     ).toHaveLength(1);
+  });
+
+  test("workspace layout snapshots collapse panel splits to avoid orphan panel leaves", () => {
+    const baseState = createWorkbenchLayoutState({
+      activities,
+      panels,
+      hasRightSidebar: true,
+      initialSidebarState: {
+        left: { visible: true, activeActivityId: "files", activePanelId: "files" },
+        right: { visible: true, activeActivityId: "outline", activePanelId: "outline" },
+      },
+    });
+
+    const splitRoot = splitSectionTree(baseState.root, "right-sidebar", "vertical", {
+      ratio: 0.5,
+      first: createWorkbenchPanelDraft(
+        "right-sidebar-section",
+        "Right Sidebar",
+        WORKBENCH_RIGHT_PANEL_SECTION_ID,
+      ),
+      second: createWorkbenchPanelDraft(
+        "right-sidebar-split",
+        "Right Sidebar Split",
+        "right-sidebar-panels",
+      ),
+    });
+
+    const exportedSnapshot = exportWorkbenchLayoutSnapshot({
+      ...baseState,
+      root: splitRoot,
+    });
+    expect(findSectionNode(exportedSnapshot.root, "right-sidebar")?.split).toBeNull();
+    expect(findSectionNode(exportedSnapshot.root, "right-sidebar-split")).toBeNull();
+
+    const legacyPollutedSnapshot = {
+      ...exportWorkbenchLayoutSnapshot(baseState),
+      root: splitRoot,
+    };
+    const restoredState = applyWorkbenchLayoutSnapshot(baseState, legacyPollutedSnapshot);
+
+    expect(findSectionNode(restoredState.root, "right-sidebar")?.split).toBeNull();
+    expect(findSectionNode(restoredState.root, "right-sidebar-split")).toBeNull();
+    expect(restoredState.panelSections.sections["right-sidebar-panels"]).toBeUndefined();
+  });
+
+  test("panel layout export omits satellite sections not present in root", () => {
+    const baseState = createWorkbenchLayoutState({
+      activities,
+      panels,
+      hasRightSidebar: true,
+      initialSidebarState: {
+        left: { visible: true, activeActivityId: "files", activePanelId: "files" },
+        right: { visible: true, activeActivityId: null, activePanelId: "ai-chat" },
+      },
+    });
+    const rightSection = baseState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]!;
+    const leftSection = baseState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]!;
+    const outlinePanel = rightSection.panels.find((panel) => panel.id === "outline")!;
+    const remainingPanels = rightSection.panels.filter((panel) => panel.id !== "outline");
+
+    const exportedSnapshot = exportWorkbenchPanelLayoutSnapshot({
+      ...baseState,
+      root: baseState.root,
+      panelSections: createPanelSectionsState([
+        leftSection,
+        {
+          id: WORKBENCH_RIGHT_PANEL_SECTION_ID,
+          panels: remainingPanels,
+          focusedPanelId: "ai-chat",
+          isCollapsed: false,
+        },
+        {
+          id: "right-sidebar-panels",
+          panels: [outlinePanel],
+          focusedPanelId: "outline",
+          isCollapsed: false,
+        },
+      ]),
+    });
+
+    expect(exportedSnapshot.sections.map((section) => section.id)).toEqual([
+      WORKBENCH_LEFT_PANEL_SECTION_ID,
+      WORKBENCH_RIGHT_PANEL_SECTION_ID,
+    ]);
+    expect(exportedSnapshot.sections.some((section) => section.id === "right-sidebar-panels")).toBe(false);
   });
 
     test("panel layout snapshots must not restore polluted main tab splits", () => {

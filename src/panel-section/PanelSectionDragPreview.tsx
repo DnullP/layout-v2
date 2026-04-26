@@ -84,14 +84,25 @@ export function PanelSectionDragPreview(props: {
             }
         }
 
+        function handlePointerCancel(event: PointerEvent): void {
+            const baseSession = sessionRef.current ?? currentSession;
+            if (event.pointerId !== baseSession.pointerId) {
+                return;
+            }
+
+            // Source section pre-destroy can cancel the original pointer target
+            // even though the drag is still active. Keep the global session alive
+            // and let pointerup perform the only commit/cleanup path.
+        }
+
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerEnd);
-        window.addEventListener("pointercancel", handlePointerEnd);
+        window.addEventListener("pointercancel", handlePointerCancel);
 
         return () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerEnd);
-            window.removeEventListener("pointercancel", handlePointerEnd);
+            window.removeEventListener("pointercancel", handlePointerCancel);
         };
     }, [session, onSessionChange, onSessionEnd]);
 

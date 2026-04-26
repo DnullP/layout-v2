@@ -79,7 +79,7 @@ import {
 import type { ActivityBarFocusBridge } from "./focusBridge";
 import type { PanelSectionFocusBridge } from "./focusBridge";
 import type { ActivityBarStateItem } from "../activity-bar/activityBarModel";
-import type { PanelSectionStateItem, PanelSectionPanelDefinition } from "../panel-section/panelSectionModel";
+import { findPanelInSectionsState, type PanelSectionStateItem, type PanelSectionPanelDefinition } from "../panel-section/panelSectionModel";
 import type {
     WorkbenchActivityDefinition,
     WorkbenchApi,
@@ -158,6 +158,8 @@ export interface VSCodeWorkbenchProps {
     preserveActiveTabContentDuringDrag?: boolean;
     /** 是否在新建的 tab split preview section 中渲染真实 tab 内容。默认开启；重型 editor 宿主可关闭，仅保留预览结构和标题。 */
     renderTabContentInDragPreviewLayout?: boolean;
+    /** 是否在新建的 panel split preview section 中渲染真实 panel 内容。默认开启；重型 panel 宿主可关闭，仅保留预览结构和标题。 */
+    renderPanelContentInDragPreviewLayout?: boolean;
     /** 渲染轻量 tab 拖拽预览内容；用于重型宿主提供 DOM 镜像等无副作用预览。 */
     renderTabDragPreviewContent?: (
         tab: TabSectionTabDefinition,
@@ -479,6 +481,58 @@ function areEquivalentPanelDragSessions(
     );
 }
 
+function collectSectionComponentLeafIds(
+    root: SectionNode<WorkbenchSectionData>,
+    componentType: WorkbenchSectionData["component"]["type"],
+): string[] {
+    const ids: string[] = [];
+    const visit = (node: SectionNode<WorkbenchSectionData>): void => {
+        if (node.split) {
+            visit(node.split.children[0]);
+            visit(node.split.children[1]);
+            return;
+        }
+
+        if (getSectionComponentBinding(node).type === componentType) {
+            ids.push(node.id);
+        }
+    };
+
+    visit(root);
+    return ids;
+}
+
+function haveSectionComponentLeafIdsChanged(
+    previous: SectionNode<WorkbenchSectionData>,
+    next: SectionNode<WorkbenchSectionData>,
+    componentType: WorkbenchSectionData["component"]["type"],
+): boolean {
+    const previousIds = collectSectionComponentLeafIds(previous, componentType);
+    const nextIds = collectSectionComponentLeafIds(next, componentType);
+    if (previousIds.length !== nextIds.length) {
+        return true;
+    }
+
+    return previousIds.some((id, index) => id !== nextIds[index]);
+}
+
+function findPanelSectionLeafId(
+    root: SectionNode<WorkbenchSectionData>,
+    panelSectionId: string,
+): string | null {
+    const visit = (node: SectionNode<WorkbenchSectionData>): string | null => {
+        if (!node.split) {
+            return workbenchPanelAdapter.getPanelSectionId?.(node) === panelSectionId
+                ? node.id
+                : null;
+        }
+
+        return visit(node.split.children[0]) ?? visit(node.split.children[1]);
+    };
+
+    return visit(root);
+}
+
 export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const {
         activities = [],
@@ -498,6 +552,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         tabDragPreviewRenderMode = "inline",
         preserveActiveTabContentDuringDrag = false,
         renderTabContentInDragPreviewLayout = true,
+        renderPanelContentInDragPreviewLayout = true,
         renderTabDragPreviewContent,
         renderActivityIcon,
         renderPanelContent,
@@ -610,8 +665,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 },
             } : undefined,
         });
-        initialState = applyWorkbenchPanelLayoutSnapshot(initialState, initialPanelLayoutSnapshot);
         initialState = applyWorkbenchLayoutSnapshot(initialState, initialLayoutSnapshot);
+        initialState = applyWorkbenchPanelLayoutSnapshot(initialState, initialPanelLayoutSnapshot);
 
         storeRef.current = createVSCodeLayoutStore({
             initialState,
@@ -723,7 +778,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Late-arriving section ratio restoration ---
     // backendConfig loads async, so initialSectionRatios may be undefined on
     // the first render that creates the store. Apply them once they arrive.
-    const initialRatiosAppliedRef = useRef(!!initialSectionRatios);
+    const initialRatiosAppliedRef = useRef(false);
     useEffect(() => {
         if (!initialRatiosAppliedRef.current && initialSectionRatios) {
             initialRatiosAppliedRef.current = true;
@@ -733,7 +788,27 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
     }, [initialSectionRatios, store]);
 
-    const initialPanelLayoutAppliedRef = useRef(!!initialPanelLayoutSnapshot);
+    const initialLayoutSnapshotAppliedRef = useRef(false);
+    useEffect(() => {
+        if (!initialLayoutSnapshotAppliedRef.current && initialLayoutSnapshot) {
+            let didApply = false;
+            initialLayoutSnapshotAppliedRef.current = true;
+            store.updateState((currentState) => {
+                const nextState = applyWorkbenchLayoutSnapshot(currentState, initialLayoutSnapshot);
+                didApply = nextState !== currentState;
+                if (!didApply || !initialPanelLayoutSnapshot) {
+                    return nextState;
+                }
+
+                return applyWorkbenchPanelLayoutSnapshot(nextState, initialPanelLayoutSnapshot);
+            });
+            if (!didApply) {
+                initialLayoutSnapshotAppliedRef.current = false;
+            }
+        }
+    }, [hasRightSidebar, initialLayoutSnapshot, initialPanelLayoutSnapshot, store]);
+
+    const initialPanelLayoutAppliedRef = useRef(false);
     useEffect(() => {
         if (!initialPanelLayoutAppliedRef.current && initialPanelLayoutSnapshot) {
             initialPanelLayoutAppliedRef.current = true;
@@ -742,22 +817,6 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             });
         }
     }, [initialPanelLayoutSnapshot, store]);
-
-    const initialLayoutSnapshotAppliedRef = useRef(!!initialLayoutSnapshot);
-    useEffect(() => {
-        if (!initialLayoutSnapshotAppliedRef.current && initialLayoutSnapshot) {
-            let didApply = false;
-            initialLayoutSnapshotAppliedRef.current = true;
-            store.updateState((currentState) => {
-                const nextState = applyWorkbenchLayoutSnapshot(currentState, initialLayoutSnapshot);
-                didApply = nextState !== currentState;
-                return nextState;
-            });
-            if (!didApply) {
-                initialLayoutSnapshotAppliedRef.current = false;
-            }
-        }
-    }, [hasRightSidebar, initialLayoutSnapshot, store]);
 
     // --- Section ratio change notification ---
     const onSectionRatioChangeRef = useRef(onSectionRatioChange);
@@ -779,7 +838,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             }
 
             if (
-                event.state.root === event.nextState.root &&
+                !haveSectionComponentLeafIdsChanged(event.state.root, event.nextState.root, "panel-section") &&
                 event.state.panelSections === event.nextState.panelSections
             ) {
                 return;
@@ -798,7 +857,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             }
 
             if (
-                event.state.root === event.nextState.root &&
+                !haveSectionComponentLeafIdsChanged(event.state.root, event.nextState.root, "tab-section") &&
                 event.state.tabSections === event.nextState.tabSections &&
                 event.state.workbench === event.nextState.workbench
             ) {
@@ -1031,14 +1090,22 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             // Don't set activeRightActivityId — the right sidebar shows all
             // right-side panels as icons in a single rail (no separate activity bar).
             setActiveRightPanelId(panelId);
-            focusPanelWithLayout("right-sidebar", WORKBENCH_RIGHT_PANEL_SECTION_ID, panelId);
+            const currentState = store.getState();
+            const location = findPanelInSectionsState(currentState.panelSections, panelId);
+            const panelSectionId = location?.section.id ?? WORKBENCH_RIGHT_PANEL_SECTION_ID;
+            const leafSectionId = findPanelSectionLeafId(currentState.root, panelSectionId) ?? "right-sidebar";
+            focusPanelWithLayout(leafSectionId, panelSectionId, panelId);
         } else {
             setLeftSidebarVisible(true);
             setActiveLeftActivityId(panelDef.activityId);
             setActiveLeftPanelId(panelId);
-            focusPanelWithLayout("left-sidebar", WORKBENCH_LEFT_PANEL_SECTION_ID, panelId);
+            const currentState = store.getState();
+            const location = findPanelInSectionsState(currentState.panelSections, panelId);
+            const panelSectionId = location?.section.id ?? WORKBENCH_LEFT_PANEL_SECTION_ID;
+            const leafSectionId = findPanelSectionLeafId(currentState.root, panelSectionId) ?? "left-sidebar";
+            focusPanelWithLayout(leafSectionId, panelSectionId, panelId);
         }
-    }, [focusPanelWithLayout, panels]);
+    }, [focusPanelWithLayout, panels, store]);
 
     // --- Sync activity bars to store ---
     useEffect(() => {
@@ -1060,11 +1127,21 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             WORKBENCH_LEFT_PANEL_SECTION_ID,
             WORKBENCH_RIGHT_PANEL_SECTION_ID,
         ]);
+        const unreachableSatelliteSectionIds: string[] = [];
         for (const [sectionId, section] of Object.entries(currentState.panelSections.sections)) {
-            if (!rootSectionIds.has(sectionId)) {
+            if (rootSectionIds.has(sectionId)) {
+                continue;
+            }
+
+            if (findPanelSectionLeafId(currentState.root, sectionId)) {
                 for (const panel of section.panels) {
                     panelsInSatelliteSections.add(panel.id);
                 }
+                continue;
+            }
+
+            if (!section.isRoot) {
+                unreachableSatelliteSectionIds.push(sectionId);
             }
         }
 
@@ -1102,6 +1179,10 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 continue;
             }
             store.upsertPanelSection(target);
+        }
+
+        for (const sectionId of unreachableSatelliteSectionIds) {
+            store.removePanelSection(sectionId);
         }
     }, [activities, panels, activeLeftActivityId, activeRightActivityId, activeLeftPanelId, activeRightPanelId, store]);
 
@@ -1398,6 +1479,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             const isRight = panelSectionProps.panelSectionId === WORKBENCH_RIGHT_PANEL_SECTION_ID;
             const isDragging = Boolean(livePanelDragSession || activityBarDragSession);
             const isPreviewLeaf = isPanelWorkbenchPreviewLeaf(section.id, isDragging);
+            const shouldRenderPanelContent = renderPanelContentInDragPreviewLayout || !isPreviewLeaf;
             const committedLeafId = resolvePanelWorkbenchCommittedLeafSectionId(
                 section.id,
                 livePanelDragSession?.hoverTarget?.anchorLeafSectionId
@@ -1424,6 +1506,10 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         )
                     )}
                     renderPanelContent={(panel) => {
+                        if (!shouldRenderPanelContent) {
+                            return panel.content;
+                        }
+
                         if (renderPanelContent) {
                             return renderPanelContent(panel.id, buildPanelContext(panel.id));
                         }
@@ -1562,6 +1648,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         tabDragPreviewRenderMode,
         preserveActiveTabContentDuringDrag,
         renderTabContentInDragPreviewLayout,
+        renderPanelContentInDragPreviewLayout,
         renderTabDragPreviewContent,
         tabComponents,
         renderedPanelSections,
