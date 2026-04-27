@@ -326,6 +326,36 @@ function collectSectionRatios<T>(node: SectionNode<T>): Record<string, number> {
     return ratios;
 }
 
+/**
+ * @function applyPersistedSectionRatios
+ * @description 恢复持久化 split 比例；只对当前仍是 split 的 section 生效。
+ *   panel/icon split 拓扑可能会在配置异步加载后才恢复，旧 ratio 也可能指向已经被折叠的 section。
+ *   因此这里必须跳过非 split section，避免启动恢复期抛出 `section is not split`。
+ * @param store VSCode layout store。
+ * @param ratios 待恢复的 sectionId -> ratio 映射。
+ * @returns 至少应用过一个 ratio 时返回 true。
+ */
+export function applyPersistedSectionRatios(
+    store: Pick<VSCodeLayoutStore<WorkbenchSectionData>, "getSection" | "resizeSection">,
+    ratios: Record<string, number> | null | undefined,
+): boolean {
+    if (!ratios) {
+        return false;
+    }
+
+    let didApply = false;
+    for (const [sectionId, ratio] of Object.entries(ratios)) {
+        const section = store.getSection(sectionId);
+        if (!section?.split) {
+            continue;
+        }
+
+        store.resizeSection(sectionId, ratio, { reason: "restore-section-ratio" });
+        didApply = true;
+    }
+    return didApply;
+}
+
 export function closeWorkbenchTabState(
     currentState: VSCodeLayoutState<WorkbenchSectionData>,
     tabId: string,
@@ -672,11 +702,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             initialState,
         });
         // Apply persisted section ratios (fire-and-forget, must run before first render)
-        if (initialSectionRatios) {
-            for (const [sectionId, ratio] of Object.entries(initialSectionRatios)) {
-                storeRef.current.resizeSection(sectionId, ratio);
-            }
-        }
+        applyPersistedSectionRatios(storeRef.current, initialSectionRatios);
     }
     const store = storeRef.current;
     const commitTabDragSession = useCallback((session: TabSectionDragSession): void => {
@@ -775,19 +801,6 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         });
     }, [state.panelSections]);
 
-    // --- Late-arriving section ratio restoration ---
-    // backendConfig loads async, so initialSectionRatios may be undefined on
-    // the first render that creates the store. Apply them once they arrive.
-    const initialRatiosAppliedRef = useRef(false);
-    useEffect(() => {
-        if (!initialRatiosAppliedRef.current && initialSectionRatios) {
-            initialRatiosAppliedRef.current = true;
-            for (const [sectionId, ratio] of Object.entries(initialSectionRatios)) {
-                store.resizeSection(sectionId, ratio);
-            }
-        }
-    }, [initialSectionRatios, store]);
-
     const initialLayoutSnapshotAppliedRef = useRef(false);
     useEffect(() => {
         if (!initialLayoutSnapshotAppliedRef.current && initialLayoutSnapshot) {
@@ -817,6 +830,17 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             });
         }
     }, [initialPanelLayoutSnapshot, store]);
+
+    // --- Late-arriving section ratio restoration ---
+    // backendConfig loads async, so restored ratios may arrive after store creation.
+    // Apply them after layout/panel snapshots had a chance to restore the split topology.
+    const initialRatiosAppliedRef = useRef(false);
+    useEffect(() => {
+        if (!initialRatiosAppliedRef.current && initialSectionRatios) {
+            initialRatiosAppliedRef.current = true;
+            applyPersistedSectionRatios(store, initialSectionRatios);
+        }
+    }, [initialPanelLayoutSnapshot, initialSectionRatios, store]);
 
     // --- Section ratio change notification ---
     const onSectionRatioChangeRef = useRef(onSectionRatioChange);
