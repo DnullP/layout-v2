@@ -13,7 +13,6 @@ import {
     type SectionDraft,
     type SectionNode,
 } from "../section/layoutModel";
-import { applyPanelSectionCollapsedFixedSize } from "../panel-section/panelSectionLayout";
 import {
     createSectionComponentBinding,
     getSectionComponentBinding,
@@ -313,10 +312,6 @@ export interface WorkbenchPanelLayoutSnapshot {
 /**
  * @interface WorkbenchTabSectionLayoutSnapshot
  * @description 可序列化的主工作区 tab section 快照。
- * @field id tab section 标识。
- * @field tabs 当前 section 内 tab 顺序。
- * @field focusedTabId 当前聚焦 tab。
- * @field isRoot 是否为 root tab section。
  */
 export interface WorkbenchTabSectionLayoutSnapshot {
     /** tab section 标识。 */
@@ -332,10 +327,6 @@ export interface WorkbenchTabSectionLayoutSnapshot {
 /**
  * @interface WorkbenchLayoutSnapshot
  * @description 可序列化的工作区主布局快照，覆盖主编辑区 tab 拓扑与打开的 tab。
- * @field version 快照版本。
- * @field root section tree 根节点。
- * @field tabSections 主编辑区 tab section 拓扑与 tab 顺序。
- * @field activeGroupId 当前活跃 tab section。
  */
 export interface WorkbenchLayoutSnapshot {
     /** 快照版本。 */
@@ -385,17 +376,9 @@ function clonePanelLayoutSectionNode(node: SectionNode<WorkbenchSectionData>): S
     };
 }
 
-/**
- * @function cloneWorkbenchLayoutSectionNode
- * @description 克隆工作区 section tree，保留主编辑区 tab split 拓扑并折叠 panel split。
- *   panel split 由独立的 panelLayout 快照负责持久化；workspaceLayout 只负责主编辑区 tab 拓扑，
- *   避免旧 workspace 快照恢复出缺少 panel section state 的悬挂 panel leaf。
- * @param node 待克隆 section 节点。
- * @returns 可序列化 section tree 节点。
- */
 function cloneWorkbenchLayoutSectionNode(node: SectionNode<WorkbenchSectionData>): SectionNode<WorkbenchSectionData> {
     const binding = getSectionComponentBinding(node);
-    return {
+    const clonedNode: SectionNode<WorkbenchSectionData> = {
         ...node,
         data: {
             ...node.data,
@@ -406,16 +389,49 @@ function cloneWorkbenchLayoutSectionNode(node: SectionNode<WorkbenchSectionData>
         },
         resizableEdges: { ...node.resizableEdges },
         meta: node.meta ? { ...node.meta } : undefined,
-        split: node.split && binding.type !== "panel-section"
-            ? {
-                  direction: node.split.direction,
-                  ratio: node.split.ratio,
-                  children: [
-                      cloneWorkbenchLayoutSectionNode(node.split.children[0]),
-                      cloneWorkbenchLayoutSectionNode(node.split.children[1]),
-                  ],
-              }
-            : null,
+        split: null,
+    };
+
+    if (!node.split || binding.type === "panel-section") {
+        return clonedNode;
+    }
+
+    return {
+        ...clonedNode,
+        split: {
+            direction: node.split.direction,
+            ratio: node.split.ratio,
+            children: [
+                cloneWorkbenchLayoutSectionNode(node.split.children[0]),
+                cloneWorkbenchLayoutSectionNode(node.split.children[1]),
+            ],
+        },
+    };
+}
+
+function restoreWorkbenchTabSubtrees(
+    panelRoot: SectionNode<WorkbenchSectionData>,
+    currentRoot: SectionNode<WorkbenchSectionData>,
+): SectionNode<WorkbenchSectionData> {
+    const binding = getSectionComponentBinding(panelRoot);
+    if (binding.type === "tab-section") {
+        const currentNode = findSectionNode(currentRoot, panelRoot.id);
+        return currentNode ? cloneWorkbenchLayoutSectionNode(currentNode) : panelRoot;
+    }
+
+    if (!panelRoot.split) {
+        return panelRoot;
+    }
+
+    return {
+        ...panelRoot,
+        split: {
+            ...panelRoot.split,
+            children: [
+                restoreWorkbenchTabSubtrees(panelRoot.split.children[0], currentRoot),
+                restoreWorkbenchTabSubtrees(panelRoot.split.children[1], currentRoot),
+            ],
+        },
     };
 }
 
@@ -442,32 +458,6 @@ function collectPanelSectionIds(root: SectionNode<WorkbenchSectionData>): Set<st
         const panelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
         if (typeof panelSectionId === "string" && panelSectionId.trim()) {
             ids.add(panelSectionId);
-        }
-    }
-
-    return ids;
-}
-
-function collectPanelSectionIdsIncludingSplitBranches(root: SectionNode<WorkbenchSectionData>): Set<string> {
-    const ids = new Set<string>();
-    const queue: SectionNode<WorkbenchSectionData>[] = [root];
-
-    while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current) {
-            continue;
-        }
-
-        const binding = getSectionComponentBinding(current);
-        if (binding.type === "panel-section") {
-            const panelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
-            if (typeof panelSectionId === "string" && panelSectionId.trim()) {
-                ids.add(panelSectionId);
-            }
-        }
-
-        if (current.split) {
-            queue.push(current.split.children[0], current.split.children[1]);
         }
     }
 
@@ -506,81 +496,6 @@ function collectTabSectionIds(root: SectionNode<WorkbenchSectionData>): Set<stri
     }
 
     return ids;
-}
-
-function restoreWorkbenchTabSubtrees(
-    panelRoot: SectionNode<WorkbenchSectionData>,
-    currentRoot: SectionNode<WorkbenchSectionData>,
-): SectionNode<WorkbenchSectionData> {
-    const binding = getSectionComponentBinding(panelRoot);
-    if (binding.type === "tab-section") {
-        const currentNode = findSectionNode(currentRoot, panelRoot.id);
-        return currentNode ? cloneWorkbenchLayoutSectionNode(currentNode) : panelRoot;
-    }
-
-    if (!panelRoot.split) {
-        return panelRoot;
-    }
-
-    return {
-        ...panelRoot,
-        split: {
-            ...panelRoot.split,
-            children: [
-                restoreWorkbenchTabSubtrees(panelRoot.split.children[0], currentRoot),
-                restoreWorkbenchTabSubtrees(panelRoot.split.children[1], currentRoot),
-            ],
-        },
-    };
-}
-
-function findLeafSectionIdByPanelSectionId(
-    root: SectionNode<WorkbenchSectionData>,
-    panelSectionId: string,
-): string | null {
-    const queue: SectionNode<WorkbenchSectionData>[] = [root];
-
-    while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current) {
-            continue;
-        }
-
-        if (current.split) {
-            queue.push(current.split.children[0], current.split.children[1]);
-            continue;
-        }
-
-        const binding = getSectionComponentBinding(current);
-        if (binding.type !== "panel-section") {
-            continue;
-        }
-
-        const currentPanelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
-        if (currentPanelSectionId === panelSectionId) {
-            return current.id;
-        }
-    }
-
-    return null;
-}
-
-function sanitizeCollapsedPanelSectionFixedSizes(
-    root: SectionNode<WorkbenchSectionData>,
-    sections: Iterable<PanelSectionStateItem>,
-): SectionNode<WorkbenchSectionData> {
-    let nextRoot = root;
-
-    for (const section of sections) {
-        const leafSectionId = findLeafSectionIdByPanelSectionId(nextRoot, section.id);
-        if (!leafSectionId) {
-            continue;
-        }
-
-        nextRoot = applyPanelSectionCollapsedFixedSize(nextRoot, leafSectionId, section.isCollapsed);
-    }
-
-    return nextRoot;
 }
 
 function buildPanelDefinitionById(
@@ -639,28 +554,21 @@ function normalizeWorkbenchLayoutTab(value: unknown): WorkbenchTabDefinition | n
 export function exportWorkbenchPanelLayoutSnapshot(
     state: VSCodeLayoutState<WorkbenchSectionData>,
 ): WorkbenchPanelLayoutSnapshot {
-    const root = clonePanelLayoutSectionNode(state.root);
-    const panelSectionIds = collectPanelSectionIds(root);
-
     return {
-        root,
-        sections: Object.values(state.panelSections.sections)
-            .filter((section) => panelSectionIds.has(section.id))
-            .map((section) => ({
-                id: section.id,
-                panelIds: section.panels.map((panel) => panel.id),
-                focusedPanelId: section.focusedPanelId,
-                isCollapsed: section.isCollapsed,
-                isRoot: section.isRoot,
-            })),
+        root: clonePanelLayoutSectionNode(state.root),
+        sections: Object.values(state.panelSections.sections).map((section) => ({
+            id: section.id,
+            panelIds: section.panels.map((panel) => panel.id),
+            focusedPanelId: section.focusedPanelId,
+            isCollapsed: section.isCollapsed,
+            isRoot: section.isRoot,
+        })),
     };
 }
 
 /**
  * @function exportWorkbenchLayoutSnapshot
  * @description 从当前 workbench 状态导出主工作区布局快照。
- * @param state 当前 workbench 布局状态。
- * @returns 工作区布局快照。
  */
 export function exportWorkbenchLayoutSnapshot(
     state: VSCodeLayoutState<WorkbenchSectionData>,
@@ -693,19 +601,17 @@ export function applyWorkbenchPanelLayoutSnapshot(
         return state;
     }
 
-    const panelRoot = clonePanelLayoutSectionNode(snapshot.root);
-    if (!findSectionNode(panelRoot, WORKBENCH_LEFT_PANEL_SECTION_ID) && !findSectionNode(panelRoot, "left-sidebar")) {
+    const root = clonePanelLayoutSectionNode(snapshot.root);
+    if (!findSectionNode(root, WORKBENCH_LEFT_PANEL_SECTION_ID) && !findSectionNode(root, "left-sidebar")) {
         return state;
     }
 
-    const tabSectionIds = collectTabSectionIds(panelRoot);
+    const tabSectionIds = collectTabSectionIds(root);
     if (tabSectionIds.size !== 1 || !tabSectionIds.has(WORKBENCH_MAIN_TAB_SECTION_ID)) {
         return state;
     }
 
-    const panelLeafSectionIds = collectPanelSectionIds(panelRoot);
-    const snapshotSectionIds = collectPanelSectionIdsIncludingSplitBranches(panelRoot);
-    const panelSectionIds = panelLeafSectionIds.size > 0 ? panelLeafSectionIds : snapshotSectionIds;
+    const panelSectionIds = collectPanelSectionIds(root);
     if (!panelSectionIds.has(WORKBENCH_LEFT_PANEL_SECTION_ID)) {
         return state;
     }
@@ -779,25 +685,16 @@ export function applyWorkbenchPanelLayoutSnapshot(
         }
     }
 
-    const panelSections = createPanelSectionsState(Array.from(restoredSections.values()));
-    const root = sanitizeCollapsedPanelSectionFixedSizes(
-        restoreWorkbenchTabSubtrees(panelRoot, state.root),
-        Object.values(panelSections.sections),
-    );
-
     return {
         ...state,
-        root,
-        panelSections,
+        root: restoreWorkbenchTabSubtrees(root, state.root),
+        panelSections: createPanelSectionsState(Array.from(restoredSections.values())),
     };
 }
 
 /**
  * @function applyWorkbenchLayoutSnapshot
  * @description 将持久化工作区主布局快照套用到当前声明式 workbench 状态。
- * @param state 当前声明式 workbench 状态。
- * @param snapshot 待恢复的工作区布局快照。
- * @returns 恢复后的 workbench 状态；快照非法或与当前侧栏能力不兼容时返回原状态。
  */
 export function applyWorkbenchLayoutSnapshot(
     state: VSCodeLayoutState<WorkbenchSectionData>,

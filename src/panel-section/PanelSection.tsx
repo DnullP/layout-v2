@@ -530,7 +530,7 @@ export function PanelSection(props: {
     ]);
 
     useEffect(() => {
-        if (!interactive || !activityDragSession || activityDragSession.phase !== "dragging") {
+        if ((!interactive && !allowContentPreview) || !activityDragSession || activityDragSession.phase !== "dragging") {
             return;
         }
 
@@ -548,6 +548,7 @@ export function PanelSection(props: {
             pointerY: activityDragSession.pointerY,
         });
         const insideBar = Boolean(
+            interactive &&
             !shouldPreferStableContentTarget &&
             barRect &&
             activityDragSession.pointerX >= barRect.left &&
@@ -634,7 +635,7 @@ export function PanelSection(props: {
                 contentTarget: needsClearContentTarget ? null : activityDragSession.contentTarget,
             });
         }
-    }, [activityDragSession, committedLeafSectionId, interactive, leafSectionId, panelSection.id, panelSection.isCollapsed, panelSection.panels, updateActivityDragSession]);
+    }, [activityDragSession, allowContentPreview, committedLeafSectionId, interactive, leafSectionId, panelSection.id, panelSection.isCollapsed, panelSection.panels, updateActivityDragSession]);
 
     const pointerInsideBar = Boolean(
         interactive &&

@@ -120,8 +120,12 @@ export interface WorkbenchApi {
     exportLayoutSnapshot: () => WorkbenchLayoutSnapshot;
     /** 设置左侧边栏可见性。 */
     setLeftSidebarVisible: (visible: boolean) => void;
+    /** 切换左侧边栏可见性。 */
+    toggleLeftSidebarVisible: () => void;
     /** 设置右侧边栏可见性。 */
     setRightSidebarVisible: (visible: boolean) => void;
+    /** 切换右侧边栏可见性。 */
+    toggleRightSidebarVisible: () => void;
 }
 
 /**

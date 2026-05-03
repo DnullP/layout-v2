@@ -197,6 +197,23 @@ function promoteRootTabSectionIfNeeded<TData extends SectionComponentData>(
   return state;
 }
 
+function resolveProtectedEmptyTabSectionId<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  state: TabSectionsState,
+  adapter: TabWorkbenchAdapter<TData>,
+): string | null {
+  const sections = Object.values(state.sections);
+  if (sections.length === 0 || sections.some((section) => section.tabs.length > 0)) {
+    return null;
+  }
+
+  return sections.find((section) => (
+    section.isRoot && Boolean(findTabSectionLeafContext(root, section.id, adapter))
+  ))?.id ?? sections.find((section) => (
+    Boolean(findTabSectionLeafContext(root, section.id, adapter))
+  ))?.id ?? null;
+}
+
 export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentData>(
   root: SectionNode<TData>,
   state: TabSectionsState,
@@ -206,6 +223,19 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
   let nextState = state;
 
   while (true) {
+    const protectedEmptySectionId = resolveProtectedEmptyTabSectionId(nextRoot, nextState, adapter);
+    if (protectedEmptySectionId && !nextState.sections[protectedEmptySectionId]?.isRoot) {
+      nextState = {
+        sections: {
+          ...nextState.sections,
+          [protectedEmptySectionId]: {
+            ...nextState.sections[protectedEmptySectionId],
+            isRoot: true,
+          },
+        },
+      };
+    }
+
     const emptySectionIds = Object.values(nextState.sections)
       .filter((section) => section.tabs.length === 0)
       .map((section) => section.id);
@@ -214,6 +244,9 @@ export function cleanupEmptyTabWorkbenchSections<TData extends SectionComponentD
     for (const tabSectionId of emptySectionIds) {
       const tabSection = nextState.sections[tabSectionId];
       if (!tabSection) {
+        continue;
+      }
+      if (tabSectionId === protectedEmptySectionId) {
         continue;
       }
 
