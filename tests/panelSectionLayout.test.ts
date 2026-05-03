@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
     applyPanelSectionCollapsedLayout,
     focusPanelSectionWithLayout,
-    resolvePanelSectionCollapsedFixedSize,
-    resolvePanelSectionParentSplitDirection,
+    PANEL_SECTION_COLLAPSED_BAR_SIZE,
 } from "../src/panel-section/panelSectionLayout";
 import {
     createPanelSectionsState,
@@ -33,6 +32,7 @@ function createDraft(
     title: string,
     role: TestBindingData["role"],
     component: TestBindingData["component"],
+    meta?: SectionDraft<TestBindingData>["meta"],
 ): SectionDraft<TestBindingData> {
     return {
         id,
@@ -41,17 +41,12 @@ function createDraft(
             role,
             component,
         },
+        meta,
     };
 }
 
 describe("panelSectionLayout", () => {
-    test("应根据父 split 方向解析折叠固定尺寸", () => {
-        expect(resolvePanelSectionCollapsedFixedSize(2, "horizontal")).toBe(122);
-        expect(resolvePanelSectionCollapsedFixedSize(2, "vertical")).toBe(48);
-        expect(resolvePanelSectionCollapsedFixedSize(2, null)).toBeNull();
-    });
-
-    test("折叠 panel section 时应给 leaf 写入 bar-only fixed size", () => {
+    test("横向父 split 中折叠 panel section 时应保留 sidebar 宽度并清理旧 fixed size", () => {
         let root = createRootSection<TestBindingData>(
             createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
         );
@@ -62,6 +57,7 @@ describe("panelSectionLayout", () => {
                 "Sidebar",
                 "sidebar",
                 createSectionComponentBinding("panel-section", { panelSectionId: "sidebar-panels" }),
+                { "layout-v2:fixedSize": 240 },
             ),
             second: createDraft(
                 "main-leaf",
@@ -83,8 +79,6 @@ describe("panelSectionLayout", () => {
             },
         ]);
 
-        expect(resolvePanelSectionParentSplitDirection(root, "sidebar-leaf")).toBe("horizontal");
-
         const collapsed = applyPanelSectionCollapsedLayout(root, state, {
             leafSectionId: "sidebar-leaf",
             panelSectionId: "sidebar-panels",
@@ -93,7 +87,8 @@ describe("panelSectionLayout", () => {
 
         const collapsedLeaf = findSectionNode(collapsed.root, "sidebar-leaf");
         expect(collapsed.state.sections["sidebar-panels"]?.isCollapsed).toBe(true);
-        expect(collapsedLeaf?.meta?.["layout-v2:fixedSize"]).toBe(122);
+        expect(collapsedLeaf?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
+        expect(findSectionNode(collapsed.root, "main-leaf")).toBeTruthy();
 
         const expanded = applyPanelSectionCollapsedLayout(collapsed.root, collapsed.state, {
             leafSectionId: "sidebar-leaf",
@@ -103,6 +98,67 @@ describe("panelSectionLayout", () => {
 
         const expandedLeaf = findSectionNode(expanded.root, "sidebar-leaf");
         expect(expanded.state.sections["sidebar-panels"]?.isCollapsed).toBe(false);
+        expect(expandedLeaf?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
+    });
+
+    test("纵向父 split 中折叠 panel section 时应只保留 strip 高度", () => {
+        let root = createRootSection<TestBindingData>(
+            createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+        );
+
+        root = splitSectionTree(root, "root", "vertical", {
+            first: createDraft(
+                "top-sidebar-leaf",
+                "Top Sidebar",
+                "sidebar",
+                createSectionComponentBinding("panel-section", { panelSectionId: "top-panels" }),
+                { "layout-v2:fixedSize": 240 },
+            ),
+            second: createDraft(
+                "bottom-sidebar-leaf",
+                "Bottom Sidebar",
+                "sidebar",
+                createSectionComponentBinding("panel-section", { panelSectionId: "bottom-panels" }),
+            ),
+        });
+
+        const state = createPanelSectionsState([
+            {
+                id: "top-panels",
+                panels: [
+                    { id: "outline", label: "Outline", symbol: "O", content: "Outline pane" },
+                ],
+                focusedPanelId: "outline",
+                isCollapsed: false,
+            },
+            {
+                id: "bottom-panels",
+                panels: [
+                    { id: "problems", label: "Problems", symbol: "P", content: "Problems pane" },
+                ],
+                focusedPanelId: "problems",
+                isCollapsed: false,
+            },
+        ]);
+
+        const collapsed = applyPanelSectionCollapsedLayout(root, state, {
+            leafSectionId: "top-sidebar-leaf",
+            panelSectionId: "top-panels",
+            isCollapsed: true,
+        });
+
+        const collapsedLeaf = findSectionNode(collapsed.root, "top-sidebar-leaf");
+        expect(collapsed.state.sections["top-panels"]?.isCollapsed).toBe(true);
+        expect(collapsedLeaf?.meta?.["layout-v2:fixedSize"]).toBe(PANEL_SECTION_COLLAPSED_BAR_SIZE);
+
+        const expanded = applyPanelSectionCollapsedLayout(collapsed.root, collapsed.state, {
+            leafSectionId: "top-sidebar-leaf",
+            panelSectionId: "top-panels",
+            isCollapsed: false,
+        });
+
+        const expandedLeaf = findSectionNode(expanded.root, "top-sidebar-leaf");
+        expect(expanded.state.sections["top-panels"]?.isCollapsed).toBe(false);
         expect(expandedLeaf?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
     });
 
@@ -117,6 +173,7 @@ describe("panelSectionLayout", () => {
                 "Sidebar",
                 "sidebar",
                 createSectionComponentBinding("panel-section", { panelSectionId: "sidebar-panels" }),
+                { "layout-v2:fixedSize": 122 },
             ),
             second: createDraft(
                 "main-leaf",

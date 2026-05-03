@@ -9,7 +9,7 @@
   align-items: center;
   padding: 10px 0;
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--bg-secondary) 92%, black 8%);
+  background: var(--chrome-activity-bar-bg, color-mix(in srgb, var(--bg-secondary) 92%, black 8%));
   user-select: none;
 }
 
@@ -20,7 +20,8 @@
 
 /* 当前 pointer 悬停到的 activity bar：作为跨 bar 落位反馈。 */
 .layout-v2-activity-bar--drag-over {
-  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--accent-primary-soft) 12%);
+  background: var(--chrome-activity-bar-bg, color-mix(in srgb, var(--bg-secondary) 92%, black 8%));
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent-primary-soft) 26%, transparent);
 }
 
 /* icon 列表：从上至下排列 icon。 */
@@ -61,6 +62,7 @@
   width: 36px;
   height: 36px;
   border: none;
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
   display: flex;
@@ -68,28 +70,37 @@
   justify-content: center;
   cursor: pointer;
   touch-action: none;
+  transition:
+    color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    transform var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
 }
 
 /* icon hover 态：轻微提亮以表达可交互性。 */
 .layout-v2-activity-bar__icon:hover {
-  color: var(--text-primary);
+  color: color-mix(in srgb, var(--accent-primary) 66%, var(--text-primary));
+  transform: scale(1.06);
 }
 
-/* 选中 icon：显示更强前景色和左侧选中条。 */
+/* 选中 icon：只强化图标本身，避免额外边框挤占 strip 空间。 */
 .layout-v2-activity-bar__icon--selected {
   position: relative;
-  color: var(--text-primary);
+  color: var(--accent-primary);
+  transform: scale(1.12);
 }
 
-/* 选中指示条：模拟 activity bar 的选中条。 */
+.layout-v2-activity-bar__icon--selected:hover {
+  color: var(--accent-primary);
+  transform: scale(1.12);
+}
+
 .layout-v2-activity-bar__icon--selected::before {
-  content: "";
-  position: absolute;
-  left: -6px;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  background: var(--text-primary);
+  content: none;
+}
+
+.layout-v2-activity-bar__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
 }
 
 /* 正在被拖动的 icon 本体：交由浮层展示，原按钮不再显示。 */

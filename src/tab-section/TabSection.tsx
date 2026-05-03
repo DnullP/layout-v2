@@ -759,6 +759,7 @@ export function TabSection(props: {
     >
       <div
         ref={stripRef}
+        data-tauri-drag-region
         className={[
           "layout-v2-tab-section__strip",
           pointerInsideStrip ? "layout-v2-tab-section__strip--drag-over" : "",
@@ -778,6 +779,7 @@ export function TabSection(props: {
               <div
                 className={[
                   "layout-v2-tab-section__tab",
+                  "window-no-drag",
                   tabSection.focusedTabId === tab.id ? "layout-v2-tab-section__tab--focused" : "",
                 ].filter(Boolean).join(" ")}
               >

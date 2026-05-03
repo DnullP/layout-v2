@@ -28,6 +28,7 @@ import {
   type WorkbenchActivityDefinition,
   type WorkbenchPanelDefinition,
 } from "../src";
+import { PANEL_SECTION_COLLAPSED_BAR_SIZE } from "../src/panel-section/panelSectionLayout";
 
 interface TestBindingData extends SectionComponentData {
   role: "root" | "sidebar" | "container";
@@ -1170,6 +1171,130 @@ describe("workbench panel layout snapshot persistence", () => {
         .flatMap((section) => section.panels)
         .filter((panel) => panel.id === "backlinks"),
     ).toHaveLength(1);
+  });
+
+  test("collapsed panel layout restore clears legacy fixed size while preserving the leaf", () => {
+    const baseState = createWorkbenchLayoutState({
+      activities,
+      panels,
+      hasRightSidebar: true,
+      initialSidebarState: {
+        left: { visible: true, activeActivityId: "files", activePanelId: "files" },
+        right: { visible: true, activeActivityId: "outline", activePanelId: "outline" },
+      },
+    });
+    const leftSection = baseState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]!;
+    const rightSection = baseState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]!;
+    const snapshot = exportWorkbenchPanelLayoutSnapshot({
+      ...baseState,
+      panelSections: createPanelSectionsState([
+        {
+          ...leftSection,
+          isCollapsed: true,
+        },
+        rightSection,
+      ]),
+    });
+    const workbenchShell = snapshot.root.split?.children[1];
+    const leftSidebar = workbenchShell?.split?.children[0];
+    expect(leftSidebar?.id).toBe("left-sidebar");
+
+    const pollutedSnapshot = {
+      ...snapshot,
+      root: {
+        ...snapshot.root,
+        split: snapshot.root.split
+          ? {
+              ...snapshot.root.split,
+              children: [
+                snapshot.root.split.children[0],
+                {
+                  ...snapshot.root.split.children[1],
+                  split: snapshot.root.split.children[1].split
+                    ? {
+                        ...snapshot.root.split.children[1].split,
+                        children: [
+                          {
+                            ...snapshot.root.split.children[1].split.children[0],
+                            meta: { "layout-v2:fixedSize": 86 },
+                          },
+                          snapshot.root.split.children[1].split.children[1],
+                        ],
+                      }
+                    : null,
+                },
+              ],
+            }
+          : null,
+      },
+    };
+
+    const restoredState = applyWorkbenchPanelLayoutSnapshot(baseState, pollutedSnapshot);
+    const restoredLeft = findSectionNode(restoredState.root, "left-sidebar");
+
+    expect(restoredState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]?.isCollapsed).toBe(true);
+    expect(restoredLeft).toBeTruthy();
+    expect(restoredLeft?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
+  });
+
+  test("collapsed panel layout restore fixes vertical split leaf to the strip height", () => {
+    const baseState = createWorkbenchLayoutState({
+      activities,
+      panels,
+      hasRightSidebar: true,
+      initialSidebarState: {
+        left: { visible: true, activeActivityId: "files", activePanelId: "files" },
+        right: { visible: true, activeActivityId: "outline", activePanelId: "outline" },
+      },
+    });
+    const rightSection = baseState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]!;
+    const outlinePanel = rightSection.panels.find((panel) => panel.id === "outline")!;
+    const backlinksPanel = rightSection.panels.find((panel) => panel.id === "backlinks")!;
+
+    const splitRoot = splitSectionTree(baseState.root, "right-sidebar", "vertical", {
+      ratio: 0.5,
+      first: createWorkbenchPanelDraft(
+        "right-sidebar-section",
+        "Right Sidebar",
+        WORKBENCH_RIGHT_PANEL_SECTION_ID,
+      ),
+      second: createWorkbenchPanelDraft(
+        "right-sidebar-split",
+        "Right Sidebar Split",
+        "right-sidebar-panels",
+      ),
+    });
+
+    const splitState = {
+      ...baseState,
+      root: splitRoot,
+      panelSections: createPanelSectionsState([
+        baseState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]!,
+        {
+          id: WORKBENCH_RIGHT_PANEL_SECTION_ID,
+          panels: [outlinePanel],
+          focusedPanelId: "outline",
+          isCollapsed: true,
+        },
+        {
+          id: "right-sidebar-panels",
+          panels: [backlinksPanel],
+          focusedPanelId: "backlinks",
+          isCollapsed: false,
+        },
+      ]),
+    };
+
+    const restoredState = applyWorkbenchPanelLayoutSnapshot(
+      baseState,
+      exportWorkbenchPanelLayoutSnapshot(splitState),
+    );
+    const restoredRightSection = findSectionNode(restoredState.root, "right-sidebar-section");
+    const restoredRightSplit = findSectionNode(restoredState.root, "right-sidebar-split");
+
+    expect(restoredState.panelSections.sections[WORKBENCH_RIGHT_PANEL_SECTION_ID]?.isCollapsed).toBe(true);
+    expect(restoredRightSection?.meta?.["layout-v2:fixedSize"]).toBe(PANEL_SECTION_COLLAPSED_BAR_SIZE);
+    expect(restoredRightSplit?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
   });
 
   test("workspace layout snapshots collapse panel splits to avoid orphan panel leaves", () => {

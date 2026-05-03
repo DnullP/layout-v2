@@ -15,7 +15,7 @@ import {
     type ReactNode,
     type Ref,
 } from "react";
-import { findSectionNode, isSectionHidden, setSectionHidden, type SectionNode } from "../section/layoutModel";
+import { describeSectionPath, findSectionNode, isSectionHidden, setSectionHidden, type SectionNode } from "../section/layoutModel";
 import { createSectionComponentBinding, createSectionComponentRegistry, getSectionComponentBinding, SectionComponentHost } from "../section/sectionComponent";
 import { SectionLayoutView } from "../section/SectionLayoutView";
 import { ActivityBar } from "../activity-bar/ActivityBar";
@@ -45,6 +45,8 @@ import {
     commitTabWorkbenchDrop,
     cleanupEmptyTabWorkbenchSections,
     PREVIEW_TAB_SECTION_ID_PREFIX,
+    isTabWorkbenchPreviewLeaf,
+    resolveTabWorkbenchCommittedLeafSectionId,
     type TabWorkbenchAdapter,
 } from "./tabWorkbench";
 import {
@@ -561,6 +563,13 @@ function findPanelSectionLeafId(
     };
 
     return visit(root);
+}
+
+function isSectionInsideRightSidebar(
+    root: SectionNode<WorkbenchSectionData>,
+    sectionId: string,
+): boolean {
+    return describeSectionPath(root, sectionId).some((node) => node.id === "right-sidebar");
 }
 
 export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
@@ -1317,6 +1326,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const shouldRenderInlineTabPreview = !shouldRenderTabPreviewOverlay;
     const tabPreviewedRoot = shouldRenderInlineTabPreview ? tabPreview?.root ?? state.root : state.root;
     const renderedTabSections = shouldRenderInlineTabPreview ? tabPreview?.state ?? state.tabSections : state.tabSections;
+    const tabInteractionRoot = shouldRenderTabPreviewOverlay && tabPreview ? tabPreview.root : tabPreviewedRoot;
+    const tabInteractionSections = shouldRenderTabPreviewOverlay && tabPreview ? tabPreview.state : renderedTabSections;
 
     // --- Panel DnD preview ---
     const panelPreview = useMemo(
@@ -1500,7 +1511,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         "panel-section": ({ section, binding }) => {
             const panelSectionProps = binding.props as { panelSectionId: string };
             const panelSection = renderedPanelSections.sections[panelSectionProps.panelSectionId] ?? null;
-            const isRight = panelSectionProps.panelSectionId === WORKBENCH_RIGHT_PANEL_SECTION_ID;
+            const isRight = isSectionInsideRightSidebar(state.root, section.id);
             const isDragging = Boolean(livePanelDragSession || activityBarDragSession);
             const isPreviewLeaf = isPanelWorkbenchPreviewLeaf(section.id, isDragging);
             const shouldRenderPanelContent = renderPanelContentInDragPreviewLayout || !isPreviewLeaf;
@@ -1585,6 +1596,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         "tab-section": ({ section, binding }) => {
             const tsProps = binding.props as { tabSectionId: string };
             const tabSection = renderedTabSections.sections[tsProps.tabSectionId] ?? null;
+            const isOverlayPreviewActive = shouldRenderTabPreviewOverlay;
             const shouldRenderRealTabContent = Boolean(
                 renderTabContentInDragPreviewLayout ||
                 !tabSection?.id.startsWith(PREVIEW_TAB_SECTION_ID_PREFIX),
@@ -1604,6 +1616,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     tabSectionId={tsProps.tabSectionId}
                     tabSection={tabSection}
                     trackPointerLifecycle={false}
+                    dragSession={isOverlayPreviewActive ? null : undefined}
+                    interactive={isOverlayPreviewActive ? false : undefined}
+                    allowContentPreview={isOverlayPreviewActive ? false : undefined}
                     renderTabTitle={(tab) => {
                         if (renderTabTitle) return renderTabTitle(tab);
                         return <span>{tab.title}</span>;
@@ -1670,6 +1685,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         markTabContentReady,
         renderTabDragPreviewLayout,
         tabDragPreviewRenderMode,
+        shouldRenderTabPreviewOverlay,
         preserveActiveTabContentDuringDrag,
         renderTabContentInDragPreviewLayout,
         renderPanelContentInDragPreviewLayout,
@@ -1703,7 +1719,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }
 
         const tsProps = binding.props as { tabSectionId: string };
-        const tabSection = tabPreview.state.sections[tsProps.tabSectionId] ?? null;
+        const tabSection = tabInteractionSections.sections[tsProps.tabSectionId] ?? null;
+        const isDragging = Boolean(effectiveTabDragSession);
+        const isPreviewLeaf = isTabWorkbenchPreviewLeaf(section.id, isDragging);
         if (!tabSection || tabSection.tabs.length === 0) {
             return (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", opacity: 0.5, fontSize: 12 }}>
@@ -1718,8 +1736,12 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 tabSectionId={tsProps.tabSectionId}
                 tabSection={tabSection}
                 trackPointerLifecycle={false}
-                interactive={false}
-                allowContentPreview={false}
+                interactive={!isPreviewLeaf}
+                allowContentPreview={isPreviewLeaf}
+                committedLeafSectionId={resolveTabWorkbenchCommittedLeafSectionId(
+                    section.id,
+                    effectiveTabDragSession?.hoverTarget?.anchorLeafSectionId,
+                )}
                 renderInactiveTabContent={false}
                 renderTabTitle={(tab) => {
                     if (renderTabTitle) return renderTabTitle(tab);
@@ -1733,17 +1755,33 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         isPreviewTabSection: tabSection.id.startsWith(PREVIEW_TAB_SECTION_ID_PREFIX),
                     }) ?? renderDefaultTabDragPreviewContent(tab)
                 )}
-                onDragSessionChange={() => { }}
+                onDragSessionChange={setTabDragSession}
+                onDragSessionEnd={commitTabDragSession}
                 onFocusTab={() => { }}
                 onCloseTab={() => { }}
-                onMoveTab={() => { }}
+                onMoveTab={moveWorkbenchTab}
             />
         );
-    }, [renderTabDragPreviewContent, renderTabTitle, tabPreview]);
+    }, [
+        commitTabDragSession,
+        effectiveTabDragSession,
+        moveWorkbenchTab,
+        renderTabDragPreviewContent,
+        renderTabTitle,
+        tabInteractionSections,
+        tabPreview,
+    ]);
 
     return (
-        <TabDragSessionContext.Provider value={effectiveTabDragSession}>
-        <div className={className} style={{ width: "100%", height: "100%", position: "relative" }} role="main" aria-label="Dockview Main Area" data-testid="main-dockview-host">
+        <TabDragSessionContext.Provider value={shouldRenderTabPreviewOverlay ? null : effectiveTabDragSession}>
+        <div
+            className={className}
+            style={{ width: "100%", height: "100%", position: "relative" }}
+            role="main"
+            aria-label="Dockview Main Area"
+            data-testid="main-dockview-host"
+            data-layout-tab-preview-render-mode={shouldRenderTabPreviewOverlay ? "overlay" : "inline"}
+        >
             <SectionLayoutView
                 root={renderedRoot}
                 renderSection={(section: SectionNode<WorkbenchSectionData>) => (
@@ -1757,9 +1795,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     data-layout-tab-preview-overlay="true"
                     style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 20 }}
                 >
-                    <TabDragSessionContext.Provider value={null}>
+                    <TabDragSessionContext.Provider value={effectiveTabDragSession}>
                         <SectionLayoutView
-                            root={tabPreview.root}
+                            root={tabInteractionRoot}
                             renderSection={renderTabPreviewOverlaySection}
                             onResizeSection={() => { }}
                         />

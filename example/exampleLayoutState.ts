@@ -60,13 +60,17 @@ import { type PanelSectionDragSession, type PanelSectionHoverTarget, type PanelS
 import { type TabSectionDragSession, type TabSectionSplitSide } from "../src/tab-section/tabSectionDrag";
 import {
   closeTabSectionTab,
-  moveTabSectionTab,
   removeTabSection,
   upsertTabSection,
   type TabSectionsState,
   type TabSectionStateItem,
   type TabSectionTabDefinition,
 } from "../src/tab-section/tabSectionModel";
+import {
+  buildTabWorkbenchPreviewState,
+  commitTabWorkbenchDrop,
+  type TabWorkbenchAdapter,
+} from "../src/vscode-layout/tabWorkbench";
 
 /**
  * @interface ExampleSectionData
@@ -928,24 +932,17 @@ function createUniqueIdentifier(baseId: string, usedIds: Set<string>): string {
   return candidate;
 }
 
-function createCommittedIdentifiers(
-  root: SectionNode<ExampleSectionLayoutData>,
-  state: TabSectionsState,
-  anchorLeafSectionId: string,
-): {
-  tabSectionId: string;
-  originalChildSectionId: string;
-  newChildSectionId: string;
-} {
-  const usedSectionIds = collectAllSectionIds(root);
-  const usedTabSectionIds = new Set(Object.keys(state.sections));
-
-  return {
-    tabSectionId: createUniqueIdentifier(`${anchorLeafSectionId}-tabs`, usedTabSectionIds),
-    originalChildSectionId: createUniqueIdentifier(`${anchorLeafSectionId}-section`, usedSectionIds),
-    newChildSectionId: createUniqueIdentifier(`${anchorLeafSectionId}-split`, usedSectionIds),
-  };
-}
+export const exampleTabWorkbenchAdapter: TabWorkbenchAdapter<ExampleSectionLayoutData> = {
+  createTabSectionDraft: ({ sourceLeaf, nextSectionId, nextTabSectionId, title }) => createExampleSectionDraft(
+    nextSectionId,
+    title,
+    sourceLeaf.data.role,
+    createSectionComponentBinding("tab-section", {
+      tabSectionId: nextTabSectionId,
+    }),
+    sourceLeaf.resizableEdges,
+  ),
+};
 
 /**
  * @function buildPreviewLayoutState
@@ -963,105 +960,7 @@ export function buildPreviewLayoutState(
   root: SectionNode<ExampleSectionLayoutData>;
   state: TabSectionsState;
 } | null {
-  if (
-    !session ||
-    session.phase !== "dragging"
-  ) {
-    return null;
-  }
-
-  if (!session.hoverTarget) {
-    const sourceSection = state.sections[session.currentTabSectionId];
-    if (!sourceSection || sourceSection.tabs.length !== 1) {
-      return null;
-    }
-
-    const previewState = closeTabSectionTab(
-      state,
-      session.currentTabSectionId,
-      session.tabId,
-    );
-    return cleanupEmptyTabSections(root, previewState);
-  }
-
-  if (session.hoverTarget.area !== "content") {
-    return null;
-  }
-
-  if (!session.hoverTarget.splitSide) {
-    if (session.hoverTarget.tabSectionId === session.currentTabSectionId) {
-      return null;
-    }
-
-    const targetSection = state.sections[session.hoverTarget.tabSectionId];
-    if (!targetSection) {
-      return null;
-    }
-
-    const mergedPreviewState = moveTabSectionTab(state, {
-      sourceSectionId: session.currentTabSectionId,
-      targetSectionId: session.hoverTarget.tabSectionId,
-      tabId: session.tabId,
-      targetIndex: targetSection.tabs.length,
-    });
-
-    return cleanupEmptyTabSections(root, mergedPreviewState);
-  }
-
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
-  if (!targetLeaf || targetLeaf.split || targetLeaf.data.component.type !== "tab-section") {
-    return null;
-  }
-
-  const previewIds = createPreviewIdentifiers(session.hoverTarget.anchorLeafSectionId);
-  const splitPlan = resolveSplitPlan(session.hoverTarget.splitSide);
-  const originalDraft = buildSectionDraftFromLeaf(targetLeaf, previewIds.originalChildSectionId);
-  const newDraft = createExampleSectionDraft(
-    previewIds.newChildSectionId,
-    session.title,
-    targetLeaf.data.role,
-    createSectionComponentBinding("tab-section", {
-      tabSectionId: previewIds.tabSectionId,
-    }),
-  );
-
-  const previewRoot = splitSectionTree(
-    root,
-    targetLeaf.id,
-    splitPlan.direction,
-    splitPlan.originalAt === "first"
-      ? {
-        ratio: splitPlan.ratio,
-        first: originalDraft,
-        second: newDraft,
-      }
-      : {
-        ratio: splitPlan.ratio,
-        first: newDraft,
-        second: originalDraft,
-      },
-  );
-
-  let previewState = upsertTabSection(
-    state,
-    createEmptyTabSectionStateItem(previewIds.tabSectionId),
-  );
-  previewState = moveTabSectionTab(previewState, {
-    sourceSectionId: session.currentTabSectionId,
-    targetSectionId: previewIds.tabSectionId,
-    tabId: session.tabId,
-    targetIndex: 0,
-  });
-
-  const cleanedPreview = cleanupEmptyTabSections(previewRoot, previewState);
-  return {
-    root: cleanedPreview.root,
-    state: cleanedPreview.state,
-  };
+  return buildTabWorkbenchPreviewState(root, state, session, exampleTabWorkbenchAdapter);
 }
 
 export function buildCommittedTabLayoutState(
@@ -1072,80 +971,15 @@ export function buildCommittedTabLayoutState(
   root: SectionNode<ExampleSectionLayoutData>;
   state: TabSectionsState;
 } | null {
-  if (!session || session.phase !== "dragging" || !session.hoverTarget || session.hoverTarget.area !== "content") {
+  const committed = commitTabWorkbenchDrop(root, state, session, exampleTabWorkbenchAdapter);
+  if (!committed) {
     return null;
   }
 
-  if (!session.hoverTarget.splitSide) {
-    if (session.hoverTarget.tabSectionId === session.currentTabSectionId) {
-      return null;
-    }
-
-    const targetSection = state.sections[session.hoverTarget.tabSectionId];
-    if (!targetSection) {
-      return null;
-    }
-
-    const mergedState = moveTabSectionTab(state, {
-      sourceSectionId: session.currentTabSectionId,
-      targetSectionId: session.hoverTarget.tabSectionId,
-      tabId: session.tabId,
-      targetIndex: targetSection.tabs.length,
-    });
-
-    return cleanupEmptyTabSections(root, mergedState);
-  }
-
-  if (!session.hoverTarget.anchorLeafSectionId) {
-    return null;
-  }
-
-  const targetLeaf = findSectionNode(root, session.hoverTarget.anchorLeafSectionId);
-  if (!targetLeaf || targetLeaf.split || targetLeaf.data.component.type !== "tab-section") {
-    return null;
-  }
-
-  const committedIds = createCommittedIdentifiers(root, state, session.hoverTarget.anchorLeafSectionId);
-  const splitPlan = resolveSplitPlan(session.hoverTarget.splitSide);
-  const originalDraft = buildSectionDraftFromLeaf(targetLeaf, committedIds.originalChildSectionId);
-  const newDraft = createExampleSectionDraft(
-    committedIds.newChildSectionId,
-    session.title,
-    targetLeaf.data.role,
-    createSectionComponentBinding("tab-section", {
-      tabSectionId: committedIds.tabSectionId,
-    }),
-  );
-
-  const committedRoot = splitSectionTree(
-    root,
-    targetLeaf.id,
-    splitPlan.direction,
-    splitPlan.originalAt === "first"
-      ? {
-        ratio: splitPlan.ratio,
-        first: originalDraft,
-        second: newDraft,
-      }
-      : {
-        ratio: splitPlan.ratio,
-        first: newDraft,
-        second: originalDraft,
-      },
-  );
-
-  let committedState = upsertTabSection(
-    state,
-    createEmptyTabSectionStateItem(committedIds.tabSectionId),
-  );
-  committedState = moveTabSectionTab(committedState, {
-    sourceSectionId: session.currentTabSectionId,
-    targetSectionId: committedIds.tabSectionId,
-    tabId: session.tabId,
-    targetIndex: 0,
-  });
-
-  return cleanupEmptyTabSections(committedRoot, committedState);
+  return {
+    root: committed.root,
+    state: committed.state,
+  };
 }
 
 /**

@@ -7,3 +7,4 @@ export * from "./panelSectionExample";
 export * from "./sectionComponentExample";
 export * from "./sectionLayoutViewExample";
 export * from "./layoutStoreExample";
+export * from "./vscodeWorkbenchOverlayExample";

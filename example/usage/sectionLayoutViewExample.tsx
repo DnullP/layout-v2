@@ -6,6 +6,7 @@
  */
 
 import { useMemo, useState, type ReactNode } from "react";
+import { applyTabWorkbenchTabMove } from "../../src/vscode-layout/tabWorkbench";
 import { ActivityBar } from "../../src/activity-bar/ActivityBar";
 import { type ActivityBarDragSession } from "../../src/activity-bar/activityBarDrag";
 import { findPanelInSectionsState, removePanelSectionPanel } from "../../src/panel-section/panelSectionModel";
@@ -25,7 +26,7 @@ import {
     createSectionComponentRegistry,
     type SectionComponentBinding,
 } from "../../src/section/sectionComponent";
-import { TabSection } from "../../src/tab-section/TabSection";
+import { TabDragSessionContext, TabSection } from "../../src/tab-section/TabSection";
 import { TabSectionDragPreview } from "../../src/tab-section/TabSectionDragPreview";
 import { type TabSectionDragSession } from "../../src/tab-section/tabSectionDrag";
 import { useTabSectionState } from "../../src/tab-section/useTabSectionState";
@@ -40,6 +41,7 @@ import {
     buildPreviewLayoutState,
     closeTabInLayoutState,
     commitActivityToContentDrop,
+    exampleTabWorkbenchAdapter,
 } from "../exampleLayoutState";
 import { createActivityBarExampleState } from "./activityBarExample";
 import { createPanelSectionExampleState } from "./panelSectionExample";
@@ -200,6 +202,21 @@ export function SectionLayoutViewUsageExample(): ReactNode {
         panelSections.resetState(preview.state);
     };
 
+    const handleTabDragSessionEnd = (session: TabSectionDragSession): void => {
+        setTabDragSession(null);
+        if (session.hoverTarget?.area !== "content") {
+            return;
+        }
+
+        const committed = buildCommittedTabLayoutState(layout.root, tabSections.state, session);
+        if (!committed) {
+            return;
+        }
+
+        layout.resetLayout(committed.root);
+        tabSections.resetState(committed.state);
+    };
+
     const renderedRoot = tabPreview?.root ?? panelPreview?.root ?? activityContentPreview?.root ?? layout.root;
     const renderedActivityBars = panelToActivityPreview ?? activityBars.state;
     const renderedTabSections = tabPreview?.state ?? tabSections.state;
@@ -314,24 +331,12 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                         tabSectionId={tabBinding.props.tabSectionId}
                         tabSection={renderedTabSections.sections[tabBinding.props.tabSectionId] ?? null}
                         dragSession={tabDragSession}
+                        trackPointerLifecycle={false}
                         interactive={!isInteractivePreviewLeaf(section.id, Boolean(tabDragSession))}
                         allowContentPreview={isInteractivePreviewLeaf(section.id, Boolean(tabDragSession))}
                         contentRegistry={tabContentRegistryExample}
                         onDragSessionChange={setTabDragSession}
-                        onDragSessionEnd={(session) => {
-                            setTabDragSession(null);
-                            if (session.hoverTarget?.area !== "content") {
-                                return;
-                            }
-
-                            const committed = buildCommittedTabLayoutState(layout.root, tabSections.state, session);
-                            if (!committed) {
-                                return;
-                            }
-
-                            layout.resetLayout(committed.root);
-                            tabSections.resetState(committed.state);
-                        }}
+                        onDragSessionEnd={handleTabDragSessionEnd}
                         onFocusTab={(tabId) => tabSections.focusTab(tabBinding.props.tabSectionId, tabId)}
                         onCloseTab={(tabId) => {
                             const nextLayout = closeTabInLayoutState(
@@ -349,7 +354,28 @@ export function SectionLayoutViewUsageExample(): ReactNode {
                                 tabSections.resetState(nextLayout.state);
                             }
                         }}
-                        onMoveTab={(move) => tabSections.moveTab(move)}
+                        onMoveTab={(move) => {
+                            const sourceSection = tabSections.state.sections[move.sourceSectionId];
+                            if (
+                                move.sourceSectionId !== move.targetSectionId &&
+                                sourceSection?.tabs.length === 1
+                            ) {
+                                return;
+                            }
+
+                            const moved = applyTabWorkbenchTabMove(
+                                layout.root,
+                                tabSections.state,
+                                move,
+                                exampleTabWorkbenchAdapter,
+                            );
+                            if (moved.root !== layout.root) {
+                                layout.resetLayout(moved.root);
+                            }
+                            if (moved.state !== tabSections.state) {
+                                tabSections.resetState(moved.state);
+                            }
+                        }}
                     />
                 );
             },
@@ -366,29 +392,36 @@ export function SectionLayoutViewUsageExample(): ReactNode {
             renderedTabSections,
             tabDragSession,
             tabSections,
+            handleTabDragSessionEnd,
         ],
     );
 
     return (
-        <div className="layout-v2-example__app">
-            <SectionLayoutView
-                className="layout-v2-example__fullscreen-layout"
-                root={renderedRoot}
-                animationRoot={renderedRoot}
-                onResizeSection={layout.resizeSection}
-                renderSection={(section) => (
-                    <SectionComponentHost
-                        section={section}
-                        registry={registry}
-                    />
-                )}
-            />
-            <PanelSectionDragPreview
-                session={panelDragSession}
-                onSessionChange={setPanelDragSession}
-                onSessionEnd={handlePanelDragSessionEnd}
-            />
-            <TabSectionDragPreview session={tabDragSession} />
-        </div>
+        <TabDragSessionContext.Provider value={tabDragSession}>
+            <div className="layout-v2-example__app">
+                <SectionLayoutView
+                    className="layout-v2-example__fullscreen-layout"
+                    root={renderedRoot}
+                    animationRoot={renderedRoot}
+                    onResizeSection={layout.resizeSection}
+                    renderSection={(section) => (
+                        <SectionComponentHost
+                            section={section}
+                            registry={registry}
+                        />
+                    )}
+                />
+                <PanelSectionDragPreview
+                    session={panelDragSession}
+                    onSessionChange={setPanelDragSession}
+                    onSessionEnd={handlePanelDragSessionEnd}
+                />
+                <TabSectionDragPreview
+                    session={tabDragSession}
+                    onSessionChange={setTabDragSession}
+                    onSessionEnd={handleTabDragSessionEnd}
+                />
+            </div>
+        </TabDragSessionContext.Provider>
     );
 }

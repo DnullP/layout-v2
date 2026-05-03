@@ -676,6 +676,7 @@ export function PanelSection(props: {
             {shouldRenderBar ? (
                 <div
                     ref={barRef}
+                    data-tauri-drag-region
                     className={[
                         "layout-v2-panel-section__bar",
                         pointerInsideBar || activityPointerInsideBar ? "layout-v2-panel-section__bar--drag-over" : "",
@@ -708,6 +709,7 @@ export function PanelSection(props: {
                                         )}
                                         className={[
                                             "layout-v2-panel-section__panel-tab",
+                                            "window-no-drag",
                                             panelSection.focusedPanelId === panel.id ? "layout-v2-panel-section__panel-tab--focused" : "",
                                         ].filter(Boolean).join(" ")}
                                         aria-label={panel.label}
@@ -751,7 +753,7 @@ export function PanelSection(props: {
                     </div>
                     <button
                         type="button"
-                        className="layout-v2-panel-section__toggle"
+                        className="layout-v2-panel-section__toggle window-no-drag"
                         onClick={onToggleCollapsed}
                         aria-label={panelSection.isCollapsed ? "Expand pane content" : "Collapse pane content"}
                     >

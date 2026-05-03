@@ -6,6 +6,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const LAYOUT_V2_EXAMPLE_URL = "/";
+const LAYOUT_V2_OVERLAY_EXAMPLE_URL = "/?surface=vscode-workbench-overlay";
 const LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS = 320;
 const TAB_WELCOME = "Welcome";
 const TAB_REVIEW = "Review";
@@ -35,6 +36,19 @@ interface PanelSectionFrameSnapshot {
     contentIsDragOver: boolean;
 }
 
+interface TabDragFrameSnapshot {
+    sections: LayoutV2SectionSnapshot[];
+    previewSectionTitles: string[] | null;
+    previewSectionIndex: number;
+    leftSectionTitles: string[] | null;
+    rightSectionTitles: string[] | null;
+}
+
+interface SampledTabDragFrameSnapshot extends TabDragFrameSnapshot {
+    label: string;
+    pointerX: number;
+}
+
 /**
  * @function gotoLayoutV2Example
  * @description 打开 layout-v2 示例页并等待初始布局渲染完成。
@@ -43,6 +57,12 @@ interface PanelSectionFrameSnapshot {
 async function gotoLayoutV2Example(page: Page): Promise<void> {
     await page.goto(LAYOUT_V2_EXAMPLE_URL);
     await page.locator(".layout-v2-activity-bar__icon").first().waitFor({ state: "visible" });
+    await page.locator(".layout-v2-tab-section").first().waitFor({ state: "visible" });
+}
+
+async function gotoVSCodeWorkbenchOverlayExample(page: Page): Promise<void> {
+    await page.goto(LAYOUT_V2_OVERLAY_EXAMPLE_URL);
+    await page.locator('[data-testid="vscode-workbench-overlay-example"]').waitFor({ state: "visible" });
     await page.locator(".layout-v2-tab-section").first().waitFor({ state: "visible" });
 }
 
@@ -138,6 +158,104 @@ async function readTabSections(page: Page): Promise<LayoutV2SectionSnapshot[]> {
             };
         });
     });
+}
+
+async function readCommittedTabSections(page: Page): Promise<LayoutV2SectionSnapshot[]> {
+    return page.evaluate(() => {
+        const host = document.querySelector<HTMLElement>('[data-testid="main-dockview-host"]');
+        const committedRoot = host?.querySelector<HTMLElement>(':scope > .layout-v2__root') ?? null;
+        if (!committedRoot) {
+            return [];
+        }
+
+        return Array.from(committedRoot.querySelectorAll<HTMLElement>(".layout-v2-tab-section")).map((node) => {
+            const rect = node.getBoundingClientRect();
+            return {
+                id: node.getAttribute("data-tab-section-id"),
+                titles: Array.from(node.querySelectorAll<HTMLElement>(".layout-v2-tab-section__tab-title")).map((title) => title.textContent ?? ""),
+                rect: {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                },
+                emptyCardText: node.querySelector<HTMLElement>(".layout-v2-tab-section__empty-card")?.textContent ?? null,
+            };
+        });
+    });
+}
+
+async function readOverlayTabSections(page: Page): Promise<LayoutV2SectionSnapshot[]> {
+    return page.evaluate(() => {
+        const overlayRoot = document.querySelector<HTMLElement>('[data-layout-tab-preview-overlay="true"] .layout-v2__root');
+        if (!overlayRoot) {
+            return [];
+        }
+
+        return Array.from(overlayRoot.querySelectorAll<HTMLElement>(".layout-v2-tab-section")).map((node) => {
+            const rect = node.getBoundingClientRect();
+            return {
+                id: node.getAttribute("data-tab-section-id"),
+                titles: Array.from(node.querySelectorAll<HTMLElement>(".layout-v2-tab-section__tab-title")).map((title) => title.textContent ?? ""),
+                rect: {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                },
+                emptyCardText: node.querySelector<HTMLElement>(".layout-v2-tab-section__empty-card")?.textContent ?? null,
+            };
+        });
+    });
+}
+
+async function readOverlayTabDragFrameSnapshot(page: Page): Promise<TabDragFrameSnapshot> {
+    const sections = await readOverlayTabSections(page);
+    const previewSection = sections.find((section) => (section.id ?? "").startsWith("preview-tab-section")) ?? null;
+    const nonPreviewSections = sections.filter((section) => !(section.id ?? "").startsWith("preview-tab-section"));
+    const orderedSections = [...nonPreviewSections].sort((left, right) => left.rect.left - right.rect.left);
+
+    return {
+        sections,
+        previewSectionTitles: previewSection?.titles ?? null,
+        previewSectionIndex: previewSection ? sections.indexOf(previewSection) : -1,
+        leftSectionTitles: orderedSections[0]?.titles ?? null,
+        rightSectionTitles: orderedSections[1]?.titles ?? null,
+    };
+}
+
+async function readTabDragFrameSnapshot(page: Page): Promise<TabDragFrameSnapshot> {
+    const sections = await readTabSections(page);
+    const previewSection = sections.find((section) => (section.id ?? "").startsWith("preview-tab-section")) ?? null;
+    const nonPreviewSections = sections.filter((section) => !(section.id ?? "").startsWith("preview-tab-section"));
+    const orderedSections = [...nonPreviewSections].sort((left, right) => left.rect.left - right.rect.left);
+
+    return {
+        sections,
+        previewSectionTitles: previewSection?.titles ?? null,
+        previewSectionIndex: previewSection ? sections.indexOf(previewSection) : -1,
+        leftSectionTitles: orderedSections[0]?.titles ?? null,
+        rightSectionTitles: orderedSections[1]?.titles ?? null,
+    };
+}
+
+async function moveAndReadTabDragFrameSnapshot(
+    page: Page,
+    label: string,
+    pointerX: number,
+    pointerY: number,
+): Promise<SampledTabDragFrameSnapshot> {
+    await page.mouse.move(pointerX, pointerY, { steps: 1 });
+    await waitForAnimationFrames(page);
+    return {
+        label,
+        pointerX,
+        ...await readTabDragFrameSnapshot(page),
+    };
 }
 
 /**
@@ -297,7 +415,7 @@ test.describe("layout-v2 regressions", () => {
         await page.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_REVIEW }).click();
 
         await expect(page.locator('.layout-v2-tab-section__tab--focused .layout-v2-tab-section__tab-title')).toHaveText(TAB_REVIEW);
-        await expect(page.locator('.layout-v2-tab-section__card-title')).toHaveText(TAB_REVIEW);
+        await expect(page.locator('.layout-v2-tab-section__card--active .layout-v2-tab-section__card-title')).toHaveText(TAB_REVIEW);
     });
 
     test("activity bar dragging should reorder icons without losing selection", async ({ page }) => {
@@ -641,7 +759,173 @@ test.describe("layout-v2 regressions", () => {
         await page.mouse.up();
     });
 
-    test("split animation should run during preview and not restart on commit", async ({ page }) => {
+    test("dragging a lone right split tab should restore the right split preview before crossing the center", async ({ page }) => {
+        await page.setViewportSize({ width: 1024, height: 832 });
+        await gotoLayoutV2Example(page);
+
+        await dragTabToSectionContentSide(page, TAB_WELCOME, "main-tabs", "right");
+
+        const sourceTab = page.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_WELCOME }).first();
+        const sourceBounds = await sourceTab.boundingBox();
+        const leftSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
+        const leftContentBounds = await leftSection.locator('.layout-v2-tab-section__content').boundingBox();
+        const rightSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-workspace-tabs"]').first();
+        const rightContentBounds = await rightSection.locator('.layout-v2-tab-section__content').boundingBox();
+        if (!sourceBounds || !leftContentBounds || !rightContentBounds) {
+            throw new Error("right split preview continuity bounds missing");
+        }
+
+        const startX = sourceBounds.x + sourceBounds.width / 2;
+        const startY = sourceBounds.y + sourceBounds.height / 2;
+        const contentCenterY = rightContentBounds.y + rightContentBounds.height / 2;
+        const oldRightThirdX = rightContentBounds.x + rightContentBounds.width * 0.72;
+        const oldRightCenterX = rightContentBounds.x + rightContentBounds.width * 0.5;
+        const oldRightLeftThirdX = rightContentBounds.x + rightContentBounds.width * 0.28;
+        const leftHalfRightThirdX = leftContentBounds.x + leftContentBounds.width * 0.72;
+        const leftHalfLeftThirdX = leftContentBounds.x + leftContentBounds.width * 0.28;
+
+        await page.mouse.move(startX, startY);
+        await page.waitForTimeout(20);
+        await page.mouse.down();
+        await waitForAnimationFrames(page);
+
+        await page.mouse.move(startX + 8, startY + 8, { steps: 2 });
+        await waitForAnimationFrames(page);
+        const dragStartFrame = await readTabDragFrameSnapshot(page);
+
+        const rightThirdFrame = await moveAndReadTabDragFrameSnapshot(
+            page,
+            "old-right-third",
+            oldRightThirdX,
+            contentCenterY,
+        );
+        const rightCenterFrame = await moveAndReadTabDragFrameSnapshot(
+            page,
+            "old-right-center",
+            oldRightCenterX,
+            contentCenterY,
+        );
+        const rightLeftThirdFrame = await moveAndReadTabDragFrameSnapshot(
+            page,
+            "old-right-left-third",
+            oldRightLeftThirdX,
+            contentCenterY,
+        );
+        const leftHalfRightThirdFrame = await moveAndReadTabDragFrameSnapshot(
+            page,
+            "left-half-right-third",
+            leftHalfRightThirdX,
+            contentCenterY,
+        );
+        const leftThirdFrame = await moveAndReadTabDragFrameSnapshot(
+            page,
+            "left-half-left-third",
+            leftHalfLeftThirdX,
+            contentCenterY,
+        );
+
+        await page.mouse.up();
+        await waitForAnimationFrames(page, 2);
+
+        expect(dragStartFrame.sections).toHaveLength(1);
+        expect(dragStartFrame.previewSectionTitles).toBeNull();
+        expect(dragStartFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+        expect(dragStartFrame.rightSectionTitles).toBeNull();
+
+        expect(rightThirdFrame.sections).toHaveLength(2);
+        expect(rightThirdFrame.previewSectionTitles).toEqual([TAB_WELCOME]);
+        expect(rightThirdFrame.previewSectionIndex).toBe(1);
+        expect(rightThirdFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+        expect(rightThirdFrame.rightSectionTitles).toBeNull();
+
+        expect(rightCenterFrame.sections).toHaveLength(2);
+        expect(rightCenterFrame.previewSectionTitles).toEqual([TAB_WELCOME]);
+        expect(rightCenterFrame.previewSectionIndex).toBe(1);
+        expect(rightLeftThirdFrame.previewSectionTitles).toBeNull();
+
+        expect(leftHalfRightThirdFrame.sections).toHaveLength(1);
+        expect(leftHalfRightThirdFrame.previewSectionTitles).toBeNull();
+        expect(leftHalfRightThirdFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+        expect(leftHalfRightThirdFrame.rightSectionTitles).toBeNull();
+
+        expect(leftThirdFrame.sections).toHaveLength(2);
+        expect(leftThirdFrame.previewSectionTitles).toEqual([TAB_WELCOME]);
+        expect(leftThirdFrame.previewSectionIndex).toBe(0);
+        expect(leftThirdFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+        expect(leftThirdFrame.rightSectionTitles).toBeNull();
+    });
+
+    test("overlay preview should use the pre-destroy layout for right-side split hit testing", async ({ page }) => {
+        await page.setViewportSize({ width: 1024, height: 832 });
+        await gotoVSCodeWorkbenchOverlayExample(page);
+
+        await dragTabToSectionContentSide(page, TAB_WELCOME, "main-tabs", "right");
+
+        const committedAfterSplit = await readCommittedTabSections(page);
+        expect(committedAfterSplit).toHaveLength(2);
+
+        const sourceTab = page.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_WELCOME }).first();
+        const sourceBounds = await sourceTab.boundingBox();
+        const sourceSection = page.locator('.layout-v2-tab-section', {
+            has: page.locator('.layout-v2-tab-section__tab-title', { hasText: TAB_WELCOME }),
+        }).first();
+        const sourceSectionBounds = await sourceSection.boundingBox();
+        const mainSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
+        const mainSectionBounds = await mainSection.boundingBox();
+        if (!sourceBounds || !sourceSectionBounds || !mainSectionBounds) {
+            throw new Error("overlay pre-destroy hit-test bounds missing");
+        }
+
+        const projectedLeft = Math.min(sourceSectionBounds.x, mainSectionBounds.x);
+        const projectedRight = Math.max(sourceSectionBounds.x + sourceSectionBounds.width, mainSectionBounds.x + mainSectionBounds.width);
+        const projectedTop = Math.min(sourceSectionBounds.y, mainSectionBounds.y);
+        const projectedBottom = Math.max(sourceSectionBounds.y + sourceSectionBounds.height, mainSectionBounds.y + mainSectionBounds.height);
+        const projectedCenterY = (projectedTop + projectedBottom) / 2;
+        const projectedRightSplitX = projectedLeft + (projectedRight - projectedLeft) * 0.86;
+        const projectedLeftSplitX = projectedLeft + (projectedRight - projectedLeft) * 0.14;
+
+        await page.mouse.move(sourceBounds.x + sourceBounds.width / 2, sourceBounds.y + sourceBounds.height / 2);
+        await page.waitForTimeout(20);
+        await page.mouse.down();
+        await waitForAnimationFrames(page);
+
+        await page.mouse.move(sourceBounds.x + sourceBounds.width / 2 + 8, sourceBounds.y + sourceBounds.height / 2 + 8, { steps: 2 });
+        await waitForAnimationFrames(page);
+        const dragStartFrame = await readOverlayTabDragFrameSnapshot(page);
+
+        await page.mouse.move(projectedRightSplitX, projectedCenterY, { steps: 1 });
+        await waitForAnimationFrames(page);
+        const rightSplitFrame = await readOverlayTabDragFrameSnapshot(page);
+
+        await page.mouse.move(projectedLeftSplitX, projectedCenterY, { steps: 1 });
+        await waitForAnimationFrames(page);
+        const leftSplitFrame = await readOverlayTabDragFrameSnapshot(page);
+
+        const committedDuringDrag = await readCommittedTabSections(page);
+
+        await page.mouse.up();
+        await waitForAnimationFrames(page, 2);
+
+        expect(dragStartFrame.sections).toHaveLength(1);
+        expect(dragStartFrame.previewSectionTitles).toBeNull();
+        expect(dragStartFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+
+        expect(rightSplitFrame.sections).toHaveLength(2);
+        expect(rightSplitFrame.previewSectionTitles).toEqual([TAB_WELCOME]);
+        expect(rightSplitFrame.previewSectionIndex).toBe(1);
+        expect(rightSplitFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+
+        expect(leftSplitFrame.sections).toHaveLength(2);
+        expect(leftSplitFrame.previewSectionTitles).toEqual([TAB_WELCOME]);
+        expect(leftSplitFrame.previewSectionIndex).toBe(0);
+        expect(leftSplitFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
+
+        expect(committedDuringDrag).toHaveLength(2);
+        expect(committedDuringDrag.find((section) => section.titles.includes(TAB_WELCOME))?.titles).toEqual([TAB_WELCOME]);
+        expect(committedDuringDrag.find((section) => section.id === "main-tabs")?.titles).toEqual([TAB_REVIEW, TAB_METRICS]);
+    });
+
+    test("split preview should render without stale split-entering classes when animations are disabled", async ({ page }) => {
         await gotoLayoutV2Example(page);
 
         const sourceTab = page.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_WELCOME }).first();
@@ -665,7 +949,9 @@ test.describe("layout-v2 regressions", () => {
         );
         await page.waitForTimeout(40);
 
-        await expect(page.locator('.layout-v2__child-slot--split-entering')).toHaveCount(2);
+        const previewSections = await readTabSections(page);
+        expect(previewSections.find((section) => (section.id ?? "").startsWith("preview-tab-section"))?.titles).toEqual([TAB_WELCOME]);
+        await expect(page.locator('.layout-v2__child-slot--split-entering')).toHaveCount(0);
 
         await page.mouse.up();
         await page.waitForTimeout(LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS);
@@ -737,16 +1023,16 @@ test.describe("layout-v2 regressions", () => {
         await dragTabToSectionContentSide(page, TAB_METRICS, "main-tabs", "right");
 
         const leftSection = page.locator('.layout-v2-tab-section[data-tab-section-id="main-tabs"]').first();
-        const leftBounds = await leftSection.locator('.layout-v2-tab-section__content').boundingBox();
-        if (!leftBounds) {
-            throw new Error('left merge target bounds missing');
-        }
+        const sourceSection = page.locator('.layout-v2-tab-section', {
+            has: page.locator('.layout-v2-tab-section__tab-title', { hasText: TAB_METRICS }),
+        }).first();
+        const projectedCenter = await getProjectedMergeCenter(sourceSection, leftSection);
 
         await dragLocatorToPoint(
             page,
             page.locator('.layout-v2-tab-section__tab-main', { hasText: TAB_METRICS }).first(),
-            leftBounds.x + leftBounds.width / 2,
-            leftBounds.y + leftBounds.height / 2,
+            projectedCenter.x,
+            projectedCenter.y,
         );
 
         const sections = await readTabSections(page);

@@ -326,6 +326,29 @@ function resolveTargetTabWorkbenchLeaf<TData extends SectionComponentData>(
   return findTabSectionLeafContext(root, target.tabSectionId, adapter)?.leaf ?? null;
 }
 
+function resolveDetachedTabWorkbenchTargetLeaf<TData extends SectionComponentData>(
+  root: SectionNode<TData>,
+  workingRoot: SectionNode<TData>,
+  target: { anchorLeafSectionId?: string; tabSectionId: string },
+  adapter: TabWorkbenchAdapter<TData>,
+): SectionNode<TData> | null {
+  const targetLeaf = resolveTargetTabWorkbenchLeaf(workingRoot, target, adapter);
+  if (targetLeaf) {
+    return targetLeaf;
+  }
+
+  if (!target.anchorLeafSectionId) {
+    return null;
+  }
+
+  const committedLeaf = findSectionNode(root, target.anchorLeafSectionId);
+  if (!committedLeaf || committedLeaf.split || getTabSectionId(committedLeaf, adapter) !== target.tabSectionId) {
+    return null;
+  }
+
+  return findTabSectionLeafContext(workingRoot, target.tabSectionId, adapter)?.leaf ?? workingRoot;
+}
+
 export function resolveTabWorkbenchSplitPlan(side: TabSectionSplitSide): {
   direction: SectionSplitDirection;
   ratio: number;
@@ -436,7 +459,9 @@ export function buildTabWorkbenchPreviewState<TData extends SectionComponentData
     return cleanupEmptyTabWorkbenchSections(workingRoot, mergedState, adapter);
   }
 
-  const targetLeaf = resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
+  const targetLeaf = detachedBase
+    ? resolveDetachedTabWorkbenchTargetLeaf(root, workingRoot, session.hoverTarget, adapter)
+    : resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
   if (!targetLeaf || targetLeaf.split || !getTabSectionId(targetLeaf, adapter)) {
     return detachedBase;
   }
@@ -521,7 +546,9 @@ export function commitTabWorkbenchDrop<TData extends SectionComponentData>(
     };
   }
 
-  const targetLeaf = resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
+  const targetLeaf = detachedBase
+    ? resolveDetachedTabWorkbenchTargetLeaf(root, workingRoot, session.hoverTarget, adapter)
+    : resolveTargetTabWorkbenchLeaf(workingRoot, session.hoverTarget, adapter);
   if (!targetLeaf || targetLeaf.split || !getTabSectionId(targetLeaf, adapter)) {
     return null;
   }

@@ -531,6 +531,7 @@ export function ActivityBar(props: {
         event.preventDefault();
         onBackgroundContextMenu({ clientX: event.clientX, clientY: event.clientY });
       }}
+      data-tauri-drag-region
       className={[
         "layout-v2-activity-bar",
         dragSession?.phase === "dragging" || livePanelDragSession?.phase === "dragging"

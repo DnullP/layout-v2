@@ -80,6 +80,7 @@ export function ActivityBarIcon(props: {
   const { barId, index, icon, selected, dragging, focusAttributes, renderIcon, onSelect, onPointerPress, onContextMenu } = props;
   const className = [
     "layout-v2-activity-bar__icon",
+    "window-no-drag",
     selected ? "layout-v2-activity-bar__icon--selected" : "",
     dragging ? "layout-v2-activity-bar__icon--dragging" : "",
   ]

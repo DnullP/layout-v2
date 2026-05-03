@@ -2,7 +2,7 @@
  * @module host/layout-v2/panel-section/panelSectionLayout
  * @description panel section 折叠时的 leaf 布局辅助逻辑。
  *   该模块负责把 panel content 的折叠状态同步到 section tree，
- *   让宿主在保留 panel bar 可交互入口的同时，真正回收 content 占据的布局空间。
+ *   让宿主在隐藏 panel content 的同时保留 sidebar 当前布局占位。
  * @dependencies
  *   - ../section/layoutModel
  *   - ./panelSectionModel
@@ -16,11 +16,10 @@
  */
 
 import {
-    describeSectionPath,
     SECTION_FIXED_SIZE_META_KEY,
+    describeSectionPath,
     updateSectionMetadata,
     type SectionNode,
-    type SectionSplitDirection,
 } from "../section/layoutModel";
 import {
     focusPanelSectionPanel,
@@ -28,61 +27,75 @@ import {
     type PanelSectionsState,
 } from "./panelSectionModel";
 
-const PANEL_SECTION_COLLAPSED_BAR_HEIGHT_PX = 48;
-const PANEL_SECTION_COLLAPSED_BAR_PADDING_X_PX = 20;
-const PANEL_SECTION_COLLAPSED_PANEL_SLOT_PX = 30;
-const PANEL_SECTION_COLLAPSED_PANEL_GAP_PX = 6;
-const PANEL_SECTION_COLLAPSED_BAR_TOGGLE_GAP_PX = 8;
-const PANEL_SECTION_COLLAPSED_TOGGLE_PX = 28;
+export const PANEL_SECTION_COLLAPSED_BAR_SIZE = 38;
 
 /**
- * @function resolvePanelSectionParentSplitDirection
- * @description 解析指定 leaf section 的父 split 方向。
+ * @function clearPanelSectionFixedSize
+ * @description 清理旧版折叠逻辑写入的固定尺寸，保证折叠后仍维持当前 sidebar 占位。
  * @param root section tree 根节点。
  * @param leafSectionId 目标 leaf section id。
- * @returns 父 split 方向；如果目标没有父 split，则返回 null。
+ * @returns 清理后的 section tree。
  */
-export function resolvePanelSectionParentSplitDirection<T>(
+export function clearPanelSectionFixedSize<T>(
     root: SectionNode<T>,
     leafSectionId: string,
-): SectionSplitDirection | null {
+): SectionNode<T> {
+    return updateSectionMetadata(root, leafSectionId, (metadata) => {
+        if (!(SECTION_FIXED_SIZE_META_KEY in metadata)) {
+            return metadata;
+        }
+
+        const nextMetadata = { ...metadata };
+        delete nextMetadata[SECTION_FIXED_SIZE_META_KEY];
+        return nextMetadata;
+    });
+}
+
+function getPanelSectionParentSplitDirection<T>(
+    root: SectionNode<T>,
+    leafSectionId: string,
+): "horizontal" | "vertical" | null {
     const path = describeSectionPath(root, leafSectionId);
-    const parent = path.length >= 2 ? path[path.length - 2] : null;
-    return parent?.split?.direction ?? null;
+    if (path.length < 2) {
+        return null;
+    }
+
+    return path[path.length - 2]?.split?.direction ?? null;
 }
 
 /**
- * @function resolvePanelSectionCollapsedFixedSize
- * @description 根据父 split 方向，计算 panel section 折叠后的 bar-only 固定尺寸。
- * @param panelCount 当前 panel 数量。
- * @param parentSplitDirection 父 split 方向。
- * @returns 折叠后的固定尺寸；如果没有父 split，则返回 null。
+ * @function applyPanelSectionCollapsedFixedSize
+ * @description 按父 split 方向同步 collapsed panel leaf 的固定尺寸：
+ *   横向父 split 需要清理 fixed size，避免 sidebar 被挤窄；纵向父 split 需要固定为 strip 高度，
+ *   让折叠 section 把纵向空间让给仍有内容的 sibling section。
+ * @param root section tree 根节点。
+ * @param leafSectionId 目标 leaf section id。
+ * @param isCollapsed 目标 panel section 是否折叠。
+ * @returns 同步后的 section tree。
  */
-export function resolvePanelSectionCollapsedFixedSize(
-    panelCount: number,
-    parentSplitDirection: SectionSplitDirection | null,
-): number | null {
-    if (parentSplitDirection === "vertical") {
-        return PANEL_SECTION_COLLAPSED_BAR_HEIGHT_PX;
+export function applyPanelSectionCollapsedFixedSize<T>(
+    root: SectionNode<T>,
+    leafSectionId: string,
+    isCollapsed: boolean,
+): SectionNode<T> {
+    if (!isCollapsed) {
+        return clearPanelSectionFixedSize(root, leafSectionId);
     }
 
-    if (parentSplitDirection === "horizontal") {
-        const visiblePanelCount = Math.max(1, panelCount);
-        return (
-            PANEL_SECTION_COLLAPSED_BAR_PADDING_X_PX +
-            PANEL_SECTION_COLLAPSED_TOGGLE_PX +
-            PANEL_SECTION_COLLAPSED_BAR_TOGGLE_GAP_PX +
-            visiblePanelCount * PANEL_SECTION_COLLAPSED_PANEL_SLOT_PX +
-            Math.max(0, visiblePanelCount - 1) * PANEL_SECTION_COLLAPSED_PANEL_GAP_PX
-        );
+    const parentDirection = getPanelSectionParentSplitDirection(root, leafSectionId);
+    if (parentDirection !== "vertical") {
+        return clearPanelSectionFixedSize(root, leafSectionId);
     }
 
-    return null;
+    return updateSectionMetadata(root, leafSectionId, (metadata) => ({
+        ...metadata,
+        [SECTION_FIXED_SIZE_META_KEY]: PANEL_SECTION_COLLAPSED_BAR_SIZE,
+    }));
 }
 
 /**
  * @function applyPanelSectionCollapsedLayout
- * @description 同步 panel section 的折叠状态和 leaf 固定尺寸，让 section tree 真正回收空间。
+ * @description 同步 panel section 的折叠状态，并按父 split 方向维护 collapsed leaf 尺寸。
  * @param root section tree 根节点。
  * @param state panel sections 状态。
  * @param params 目标 leaf/panelSection 以及折叠状态。
@@ -105,29 +118,8 @@ export function applyPanelSectionCollapsedLayout<T>(
         return { root, state };
     }
 
-    const parentSplitDirection = resolvePanelSectionParentSplitDirection(root, params.leafSectionId);
-    const collapsedFixedSize = params.isCollapsed
-        ? resolvePanelSectionCollapsedFixedSize(section.panels.length, parentSplitDirection)
-        : null;
-    const nextRoot = updateSectionMetadata(root, params.leafSectionId, (metadata) => {
-        if (collapsedFixedSize == null) {
-            if (!(SECTION_FIXED_SIZE_META_KEY in metadata)) {
-                return metadata;
-            }
-
-            const nextMetadata = { ...metadata };
-            delete nextMetadata[SECTION_FIXED_SIZE_META_KEY];
-            return nextMetadata;
-        }
-
-        return {
-            ...metadata,
-            [SECTION_FIXED_SIZE_META_KEY]: collapsedFixedSize,
-        };
-    });
-
     return {
-        root: nextRoot,
+        root: applyPanelSectionCollapsedFixedSize(root, params.leafSectionId, params.isCollapsed),
         state: setPanelSectionCollapsed(state, params.panelSectionId, params.isCollapsed),
     };
 }

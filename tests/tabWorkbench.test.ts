@@ -254,6 +254,94 @@ describe("tabWorkbench helpers", () => {
     expect(previewSection?.tabs.map((tab) => tab.id)).toEqual(["review"]);
   });
 
+  test("preview split 应在 source lone tab 预折叠后重定位 source hover 到 survivor section", () => {
+    let root = createRootSection<TestBindingData>(
+      createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
+    );
+
+    root = splitSectionTree(root, "root", "horizontal", {
+      first: createDraft(
+        "left-leaf",
+        "Left",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "left-tabs",
+        }),
+      ),
+      second: createDraft(
+        "right-leaf",
+        "Right",
+        "main",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "right-tabs",
+        }),
+      ),
+    });
+
+    const state = createTabSectionsState([
+      {
+        id: "left-tabs",
+        tabs: [
+          { id: "review", title: "Review", content: "Review card" },
+          { id: "metrics", title: "Metrics", content: "Metrics card" },
+        ],
+        focusedTabId: "review",
+        isRoot: true,
+      },
+      {
+        id: "right-tabs",
+        tabs: [{ id: "welcome", title: "Welcome", content: "Welcome card" }],
+        focusedTabId: "welcome",
+        isRoot: false,
+      },
+    ]);
+
+    const session: TabSectionDragSession = {
+      sourceTabSectionId: "right-tabs",
+      currentTabSectionId: "right-tabs",
+      sourceLeafSectionId: "right-leaf",
+      currentLeafSectionId: "right-leaf",
+      tabId: "welcome",
+      title: "Welcome",
+      content: "Welcome card",
+      pointerId: 1,
+      originX: 10,
+      originY: 10,
+      pointerX: 720,
+      pointerY: 120,
+      phase: "dragging",
+      hoverTarget: {
+        area: "content",
+        leafSectionId: "right-leaf",
+        anchorLeafSectionId: "right-leaf",
+        tabSectionId: "right-tabs",
+        splitSide: "right",
+        contentBounds: {
+          left: 500,
+          top: 0,
+          right: 800,
+          bottom: 200,
+          width: 300,
+          height: 200,
+        },
+      },
+    };
+
+    const preview = buildTabWorkbenchPreviewState(root, state, session, adapter);
+
+    expect(preview).not.toBeNull();
+    expect(preview?.state.sections["right-tabs"]).toBeUndefined();
+    expect(preview?.state.sections["left-tabs"]?.tabs.map((tab) => tab.id)).toEqual(["review", "metrics"]);
+
+    const previewSection = Object.values(preview!.state.sections).find((section) => {
+      return section.tabs.some((tab) => tab.id === "welcome");
+    });
+    expect(previewSection?.tabs.map((tab) => tab.id)).toEqual(["welcome"]);
+    expect(findSectionNode(preview!.root, "right-leaf")).toBeNull();
+    expect(findSectionNode(preview!.root, "left-leaf")).toBeNull();
+    expect(findSectionNode(preview!.root, "root")?.split).not.toBeNull();
+  });
+
   test("commit split 应生成新的 committed tab section 并返回 active group", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),

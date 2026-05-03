@@ -13,6 +13,7 @@ import {
     type SectionDraft,
     type SectionNode,
 } from "../section/layoutModel";
+import { applyPanelSectionCollapsedFixedSize } from "../panel-section/panelSectionLayout";
 import {
     createSectionComponentBinding,
     getSectionComponentBinding,
@@ -533,6 +534,55 @@ function restoreWorkbenchTabSubtrees(
     };
 }
 
+function findLeafSectionIdByPanelSectionId(
+    root: SectionNode<WorkbenchSectionData>,
+    panelSectionId: string,
+): string | null {
+    const queue: SectionNode<WorkbenchSectionData>[] = [root];
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+            continue;
+        }
+
+        if (current.split) {
+            queue.push(current.split.children[0], current.split.children[1]);
+            continue;
+        }
+
+        const binding = getSectionComponentBinding(current);
+        if (binding.type !== "panel-section") {
+            continue;
+        }
+
+        const currentPanelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
+        if (currentPanelSectionId === panelSectionId) {
+            return current.id;
+        }
+    }
+
+    return null;
+}
+
+function sanitizeCollapsedPanelSectionFixedSizes(
+    root: SectionNode<WorkbenchSectionData>,
+    sections: Iterable<PanelSectionStateItem>,
+): SectionNode<WorkbenchSectionData> {
+    let nextRoot = root;
+
+    for (const section of sections) {
+        const leafSectionId = findLeafSectionIdByPanelSectionId(nextRoot, section.id);
+        if (!leafSectionId) {
+            continue;
+        }
+
+        nextRoot = applyPanelSectionCollapsedFixedSize(nextRoot, leafSectionId, section.isCollapsed);
+    }
+
+    return nextRoot;
+}
+
 function buildPanelDefinitionById(
     state: VSCodeLayoutState<WorkbenchSectionData>,
 ): Map<string, PanelSectionPanelDefinition> {
@@ -729,10 +779,16 @@ export function applyWorkbenchPanelLayoutSnapshot(
         }
     }
 
+    const panelSections = createPanelSectionsState(Array.from(restoredSections.values()));
+    const root = sanitizeCollapsedPanelSectionFixedSizes(
+        restoreWorkbenchTabSubtrees(panelRoot, state.root),
+        Object.values(panelSections.sections),
+    );
+
     return {
         ...state,
-        root: restoreWorkbenchTabSubtrees(panelRoot, state.root),
-        panelSections: createPanelSectionsState(Array.from(restoredSections.values())),
+        root,
+        panelSections,
     };
 }
 

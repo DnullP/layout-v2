@@ -5,9 +5,14 @@
  */
 
 import { type ReactNode } from "react";
-import { SectionLayoutViewUsageExample } from "../usage";
+import { SectionLayoutViewUsageExample, VSCodeWorkbenchOverlayUsageExample } from "../usage";
 
 export function App(): ReactNode {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("surface") === "vscode-workbench-overlay") {
+        return <VSCodeWorkbenchOverlayUsageExample />;
+    }
+
     return <SectionLayoutViewUsageExample />;
 }
 
