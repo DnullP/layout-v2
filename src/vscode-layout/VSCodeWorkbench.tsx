@@ -1228,7 +1228,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     );
     const shouldRenderTabPreviewOverlay = Boolean(tabPreview && tabDragPreviewRenderMode === "overlay");
     const shouldRenderInlineTabPreview = !shouldRenderTabPreviewOverlay;
-    const tabPreviewedRoot = shouldRenderInlineTabPreview ? tabPreview?.root ?? state.root : state.root;
+    const tabPreviewedRoot = shouldRenderInlineTabPreview ? tabPreview?.root ?? layoutRoot : layoutRoot;
     const renderedTabSections = shouldRenderInlineTabPreview ? tabPreview?.state ?? state.tabSections : state.tabSections;
 
     // --- Panel DnD preview ---
