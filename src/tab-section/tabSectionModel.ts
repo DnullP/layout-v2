@@ -197,6 +197,9 @@ export function focusTabSectionTab(
   if (!section || !section.tabs.some((tab) => tab.id === tabId)) {
     return state;
   }
+  if (section.focusedTabId === tabId) {
+    return state;
+  }
 
   return {
     sections: {

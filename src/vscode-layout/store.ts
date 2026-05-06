@@ -865,10 +865,16 @@ export function createVSCodeLayoutStore<T>(
             runCommand(
                 "focus-tab",
                 { sectionId, tabId },
-                (currentState) => ({
-                    ...currentState,
-                    tabSections: focusTabSectionTab(currentState.tabSections, sectionId, tabId),
-                }),
+                (currentState) => {
+                    const nextTabSections = focusTabSectionTab(currentState.tabSections, sectionId, tabId);
+                    if (nextTabSections === currentState.tabSections) {
+                        return currentState;
+                    }
+                    return {
+                        ...currentState,
+                        tabSections: nextTabSections,
+                    };
+                },
                 commandOptions,
             );
         },

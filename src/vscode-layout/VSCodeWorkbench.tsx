@@ -21,7 +21,11 @@ import { SectionLayoutView } from "../section/SectionLayoutView";
 import { ActivityBar } from "../activity-bar/ActivityBar";
 import { ActivityBarDragPreview } from "../activity-bar/ActivityBarDragPreview";
 import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
-import { type ActivityBarIconMove } from "../activity-bar/activityBarModel";
+import {
+    reconcileActivityBarsState,
+    type ActivityBarIconMove,
+    type ActivityBarsState,
+} from "../activity-bar/activityBarModel";
 import { PanelSection } from "../panel-section/PanelSection";
 import { PanelSectionDragPreview } from "../panel-section/PanelSectionDragPreview";
 import {
@@ -187,6 +191,8 @@ export interface VSCodeWorkbenchProps {
     onActivityIconContextMenu?: (iconId: string, event: { clientX: number; clientY: number }) => void;
     /** activity icon 拖拽到面板内容区触发分裂后的回调。 */
     onActivityIconDrop?: (iconId: string, newPanelSectionId: string) => void;
+    /** activity bar 运行时顺序变化回调（用于宿主持久化拖拽排序）。 */
+    onActivityBarsChange?: (state: ActivityBarsState) => void;
     /** activity bar 空白区域右键菜单回调。 */
     onActivityBarBackgroundContextMenu?: (event: { clientX: number; clientY: number }) => void;
     /** section 分割比例变化回调（用于持久化）。 */
@@ -294,8 +300,8 @@ function reconcileDeclarativePanelSection(
  * Returns true when both contain the same bars with the same icons and selection.
  */
 function areActivityBarsEqual(
-    a: { bars: Record<string, { id: string; icons: Array<{ id: string }>; selectedIconId: string | null }> },
-    b: { bars: Record<string, { id: string; icons: Array<{ id: string }>; selectedIconId: string | null }> },
+    a: { bars: Record<string, { id: string; icons: Array<{ id: string; label?: string; symbol?: string; activationMode?: string; meta?: Record<string, unknown> }>; selectedIconId: string | null }> },
+    b: { bars: Record<string, { id: string; icons: Array<{ id: string; label?: string; symbol?: string; activationMode?: string; meta?: Record<string, unknown> }>; selectedIconId: string | null }> },
 ): boolean {
     const aKeys = Object.keys(a.bars);
     const bKeys = Object.keys(b.bars);
@@ -307,7 +313,15 @@ function areActivityBarsEqual(
         if (aBar.selectedIconId !== bBar.selectedIconId) return false;
         if (aBar.icons.length !== bBar.icons.length) return false;
         for (let i = 0; i < aBar.icons.length; i++) {
-            if (aBar.icons[i].id !== bBar.icons[i].id) return false;
+            const aIcon = aBar.icons[i];
+            const bIcon = bBar.icons[i];
+            if (aIcon.id !== bIcon.id) return false;
+            if (aIcon.label !== bIcon.label) return false;
+            if (aIcon.symbol !== bIcon.symbol) return false;
+            if (aIcon.activationMode !== bIcon.activationMode) return false;
+            const aSection = (aIcon.meta as Record<string, unknown> | undefined)?.section === "bottom" ? "bottom" : "top";
+            const bSection = (bIcon.meta as Record<string, unknown> | undefined)?.section === "bottom" ? "bottom" : "top";
+            if (aSection !== bSection) return false;
         }
     }
     return true;
@@ -533,6 +547,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onCloseTab,
         onActivityIconContextMenu,
         onActivityIconDrop,
+        onActivityBarsChange,
         onActivityBarBackgroundContextMenu,
         onSectionRatioChange,
         onPanelLayoutChange,
@@ -953,6 +968,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             if (!targetSectionId) return currentState;
             const section = currentState.tabSections.sections[targetSectionId];
             if (!section) return currentState;
+            if (section.focusedTabId === tabId && currentState.workbench?.activeGroupId === targetSectionId) {
+                return currentState;
+            }
 
             return {
                 ...currentState,
@@ -1061,10 +1079,11 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Sync activity bars to store ---
     useEffect(() => {
         const nextBars = buildWorkbenchActivityBars(activities, activeLeftActivityId, activeRightActivityId);
-        // Skip update when bars content is identical to avoid unnecessary re-renders.
         const currentBars = store.getState().activityBars;
-        if (areActivityBarsEqual(currentBars, nextBars)) return;
-        store.resetActivityBars(nextBars);
+        const reconciledBars = reconcileActivityBarsState(currentBars, nextBars);
+        // Skip update when bars content is identical to avoid unnecessary re-renders.
+        if (areActivityBarsEqual(currentBars, reconciledBars)) return;
+        store.resetActivityBars(reconciledBars);
     }, [activities, activeLeftActivityId, activeRightActivityId, store]);
 
     // --- Sync panel sections to store ---
@@ -1355,6 +1374,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     onDragSessionChange={setActivityBarDragSession}
                     onDragSessionEnd={(session) => {
                         setActivityBarDragSession(null);
+                        const notifyActivityBarsChanged = (): void => {
+                            onActivityBarsChange?.(store.getState().activityBars);
+                        };
 
                         if (session.contentTarget?.splitSide) {
                             const committed = commitActivityBarContentDrop(
@@ -1363,7 +1385,10 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                                 session.contentTarget,
                                 workbenchPanelAdapter,
                             );
-                            if (!committed) return;
+                            if (!committed) {
+                                notifyActivityBarsChanged();
+                                return;
+                            }
 
                             store.replaceState({
                                 ...store.getState(),
@@ -1389,6 +1414,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                                 });
                             }
                         }
+
+                        notifyActivityBarsChanged();
                     }}
                     onPanelDragSessionChange={handlePanelDragSessionChange}
                     onActivateIcon={(iconId) => {
@@ -1594,6 +1621,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         buildPanelContext,
         onActivateActivity,
         onSelectActivity,
+        onActivityBarsChange,
         activatePanelById,
         openTab,
         closeTab,

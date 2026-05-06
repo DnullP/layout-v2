@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createActivityBarState,
   moveActivityBarIcon,
+  reconcileActivityBarsState,
   selectActivityBarIcon,
   updateActivityBarIconMetadata,
 } from "../src/activity-bar/activityBarModel";
@@ -113,6 +114,75 @@ describe("activityBarModel", () => {
       "search",
     ]);
     expect(nextState.bars.secondary.selectedIconId).toBe("search");
+  });
+
+  test("同步声明式 activity bar 时应保留运行时排序", () => {
+    const runtimeState = createActivityBarState([
+      {
+        id: "primary",
+        icons: [
+          { id: "project-reader", label: "Project Reader", symbol: "P" },
+          { id: "explorer", label: "Explorer", symbol: "E" },
+          { id: "search", label: "Search", symbol: "S" },
+        ],
+        selectedIconId: "project-reader",
+      },
+    ]);
+    const declarativeState = createActivityBarState([
+      {
+        id: "primary",
+        icons: [
+          { id: "explorer", label: "Files", symbol: "F" },
+          { id: "search", label: "Search", symbol: "S" },
+          { id: "project-reader", label: "Project Reader", symbol: "P" },
+        ],
+        selectedIconId: "explorer",
+      },
+    ]);
+
+    const nextState = reconcileActivityBarsState(runtimeState, declarativeState);
+
+    expect(nextState.bars.primary.icons.map((icon) => icon.id)).toEqual([
+      "project-reader",
+      "explorer",
+      "search",
+    ]);
+    expect(nextState.bars.primary.icons[1]?.label).toBe("Files");
+    expect(nextState.bars.primary.selectedIconId).toBe("explorer");
+  });
+
+  test("同步声明式 activity bar 时应允许 top 与 bottom 分组变化生效", () => {
+    const runtimeState = createActivityBarState([
+      {
+        id: "primary",
+        icons: [
+          { id: "search", label: "Search", symbol: "S", meta: { section: "top" } },
+          { id: "explorer", label: "Explorer", symbol: "E", meta: { section: "top" } },
+          { id: "settings", label: "Settings", symbol: "G", meta: { section: "bottom" } },
+        ],
+        selectedIconId: "explorer",
+      },
+    ]);
+    const declarativeState = createActivityBarState([
+      {
+        id: "primary",
+        icons: [
+          { id: "explorer", label: "Explorer", symbol: "E", meta: { section: "top" } },
+          { id: "settings", label: "Settings", symbol: "G", meta: { section: "bottom" } },
+          { id: "search", label: "Search", symbol: "S", meta: { section: "bottom" } },
+        ],
+        selectedIconId: "search",
+      },
+    ]);
+
+    const nextState = reconcileActivityBarsState(runtimeState, declarativeState);
+
+    expect(nextState.bars.primary.icons.map((icon) => icon.id)).toEqual([
+      "explorer",
+      "settings",
+      "search",
+    ]);
+    expect(nextState.bars.primary.selectedIconId).toBe("search");
   });
 
   test("应支持为 activity icon 挂载宿主元数据", () => {

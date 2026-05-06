@@ -32,6 +32,7 @@
  *   - selectActivityBarIcon        选中 activity icon
  *   - moveActivityBarIcon          拖拽移动 activity icon
  *   - getActivityBarById           按 ID 获取 activity bar
+ *   - reconcileActivityBarsState   同步声明式定义并保留运行时排序
  */
 
 import {
@@ -117,6 +118,96 @@ export function createActivityBarState(bars: ActivityBarStateItem[]): ActivityBa
   return {
     bars: Object.fromEntries(bars.map((bar) => [bar.id, bar])),
   };
+}
+
+function getActivityBarIconSection(icon: ActivityBarIconDefinition): "top" | "bottom" {
+  const section = (icon.meta as Record<string, unknown> | undefined)?.section;
+  return section === "bottom" ? "bottom" : "top";
+}
+
+/**
+ * @function reconcileActivityBarsState
+ * @description 将新的声明式 activity bar 定义同步到当前运行时状态。
+ *   已存在且仍属于同一 bar / top-bottom 分组的 icon 保留运行时排序；
+ *   新增 icon 按声明式顺序追加；已删除或移动到其他 bar / 分组的 icon 从原位置移除。
+ *   选中态与最新声明式状态对齐。
+ * @param current 当前运行时 activity bar 状态。
+ * @param next 最新声明式 activity bar 状态。
+ * @returns 调和后的 activity bar 状态。
+ */
+export function reconcileActivityBarsState(
+  current: ActivityBarsState,
+  next: ActivityBarsState,
+): ActivityBarsState {
+  const nextIconBarById = new Map<string, string>();
+  for (const nextBar of Object.values(next.bars)) {
+    for (const icon of nextBar.icons) {
+      nextIconBarById.set(icon.id, nextBar.id);
+    }
+  }
+
+  const reconciledBars: Record<string, ActivityBarStateItem> = {};
+
+  for (const [barId, nextBar] of Object.entries(next.bars)) {
+    const currentBar = current.bars[barId];
+    if (!currentBar) {
+      reconciledBars[barId] = nextBar;
+      continue;
+    }
+
+    const nextIconsById = new Map(nextBar.icons.map((icon) => [icon.id, icon]));
+    const sectionOrder: Array<"top" | "bottom"> = [];
+    const iconsBySection: Record<"top" | "bottom", ActivityBarIconDefinition[]> = {
+      top: [],
+      bottom: [],
+    };
+    const seen = new Set<string>();
+
+    for (const nextIcon of nextBar.icons) {
+      const section = getActivityBarIconSection(nextIcon);
+      if (!sectionOrder.includes(section)) {
+        sectionOrder.push(section);
+      }
+    }
+
+    for (const currentIcon of currentBar.icons) {
+      if (nextIconBarById.get(currentIcon.id) !== barId) {
+        continue;
+      }
+
+      const nextIcon = nextIconsById.get(currentIcon.id);
+      if (!nextIcon || seen.has(currentIcon.id)) {
+        continue;
+      }
+      if (getActivityBarIconSection(currentIcon) !== getActivityBarIconSection(nextIcon)) {
+        continue;
+      }
+
+      seen.add(currentIcon.id);
+      iconsBySection[getActivityBarIconSection(nextIcon)].push(nextIcon);
+    }
+
+    for (const nextIcon of nextBar.icons) {
+      if (seen.has(nextIcon.id)) {
+        continue;
+      }
+
+      seen.add(nextIcon.id);
+      iconsBySection[getActivityBarIconSection(nextIcon)].push(nextIcon);
+    }
+
+    const icons = sectionOrder.flatMap((section) => iconsBySection[section]);
+
+    reconciledBars[barId] = {
+      ...nextBar,
+      icons,
+      selectedIconId: icons.some((icon) => icon.id === nextBar.selectedIconId)
+        ? nextBar.selectedIconId
+        : null,
+    };
+  }
+
+  return { bars: reconciledBars };
 }
 
 /**
