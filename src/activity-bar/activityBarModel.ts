@@ -443,7 +443,10 @@ export function moveActivityBarIcon(
   const nextSourceIcons = sourceBar.icons.filter((icon) => icon.id !== move.iconId);
 
   if (move.sourceBarId === move.targetBarId) {
-    const nextTargetIndex = clampTargetIndex(move.targetIndex, nextSourceIcons.length);
+    const targetIndexAfterRemoval = move.targetIndex > sourceIndex
+      ? move.targetIndex - 1
+      : move.targetIndex;
+    const nextTargetIndex = clampTargetIndex(targetIndexAfterRemoval, nextSourceIcons.length);
     if (sourceIndex === nextTargetIndex) {
       return state;
     }

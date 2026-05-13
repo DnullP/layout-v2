@@ -894,9 +894,18 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     }, [store]);
 
     const updateTab = useCallback((tabId: string, updates: Partial<WorkbenchTabDefinition>): void => {
+        let replacedTabId: string | null = null;
         store.updateState((currentState) => {
             const sectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
             if (!sectionId) {
+                return currentState;
+            }
+
+            if (updates.id && updates.id !== tabId && findTabSectionIdByTabId(currentState.tabSections, updates.id)) {
+                console.warn("[layout-v2] updateTab skipped: target id already exists", {
+                    tabId,
+                    nextTabId: updates.id,
+                });
                 return currentState;
             }
 
@@ -908,11 +917,13 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 }
 
                 const payload = readWorkbenchTabPayload(tab);
+                const nextId = updates.id ?? tab.id;
                 const nextComponent = updates.component ?? payload.component;
                 const nextParams = updates.params ?? payload.params;
                 const nextTitle = updates.title ?? tab.title;
 
                 if (
+                    nextId === tab.id &&
                     nextComponent === payload.component &&
                     nextParams === payload.params &&
                     nextTitle === tab.title
@@ -921,8 +932,12 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 }
 
                 changed = true;
+                if (nextId !== tab.id) {
+                    replacedTabId = nextId;
+                }
                 return {
                     ...tab,
+                    id: nextId,
                     title: nextTitle,
                     payload: {
                         component: nextComponent,
@@ -941,11 +956,29 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 tabSections: {
                     sections: {
                         ...currentState.tabSections.sections,
-                        [sectionId]: { ...section, tabs: nextTabs },
+                        [sectionId]: {
+                            ...section,
+                            tabs: nextTabs,
+                            focusedTabId: section.focusedTabId === tabId ? updates.id ?? tabId : section.focusedTabId,
+                        },
                     },
                 },
             };
         });
+
+        if (replacedTabId) {
+            const nextTabId = replacedTabId;
+            setReadyTabContentIds((previous) => {
+                if (!previous.has(tabId) && !previous.has(nextTabId)) {
+                    return previous;
+                }
+
+                const next = new Set(previous);
+                next.delete(tabId);
+                next.delete(nextTabId);
+                return next;
+            });
+        }
     }, [store]);
 
     const closeTab = useCallback((tabId: string): void => {

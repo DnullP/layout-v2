@@ -133,6 +133,42 @@ async function readActivityBarSelection(page: Page): Promise<string | null> {
     });
 }
 
+async function readActivityIconSlotTransforms(page: Page): Promise<Record<string, string>> {
+    return page.evaluate(() => {
+        const result: Record<string, string> = {};
+        document.querySelectorAll<HTMLElement>(".layout-v2-activity-bar__icon-slot[data-layout-icon-slot-id]").forEach((slot) => {
+            const id = slot.getAttribute("data-layout-icon-slot-id");
+            if (!id) {
+                return;
+            }
+
+            result[id] = window.getComputedStyle(slot).transform;
+        });
+        return result;
+    });
+}
+
+async function moveActivityIconWithoutDrop(
+    page: Page,
+    source: Locator,
+    targetX: number,
+    targetY: number,
+): Promise<void> {
+    const box = await source.boundingBox();
+    if (!box) {
+        throw new Error("moveActivityIconWithoutDrop: source bounds missing");
+    }
+
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX, startY + 8, { steps: 2 });
+    await waitForAnimationFrames(page);
+    await page.mouse.move(targetX, targetY, { steps: 1 });
+    await waitForAnimationFrames(page);
+}
+
 /**
  * @function readTabSections
  * @description 读取当前 tab section 布局快照。
@@ -444,6 +480,30 @@ test.describe("layout-v2 regressions", () => {
             "Explorer",
         ]);
         await expect(page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]')).toHaveClass(/selected/);
+    });
+
+    test("activity bar reorder should animate icon slots during drag", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const source = page.locator('.layout-v2-activity-bar__icon[aria-label="Explorer"]');
+        const target = page.locator('.layout-v2-activity-bar__icon[aria-label="Source Control"]');
+        const targetBox = await target.boundingBox();
+        if (!targetBox) {
+            throw new Error("activity bar animation target bounds missing");
+        }
+
+        await moveActivityIconWithoutDrop(
+            page,
+            source,
+            targetBox.x + targetBox.width / 2,
+            targetBox.y + targetBox.height + 8,
+        );
+
+        const transforms = await readActivityIconSlotTransforms(page);
+        expect(Object.values(transforms).some((transform) => transform !== "none")).toBe(true);
+
+        await page.mouse.up();
+        await waitForAnimationFrames(page, 2);
     });
 
     test("holding a dragged activity icon near a reorder boundary should not trigger update-depth errors", async ({ page }) => {

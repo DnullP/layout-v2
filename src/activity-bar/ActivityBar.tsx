@@ -64,6 +64,8 @@ const POINTER_TARGET_HYSTERESIS_PX = 6;
  */
 const DRAG_START_DISTANCE_PX = 4;
 
+const ACTIVITY_ICON_REORDER_TRANSITION = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
+
 /**
  * @function readElementTranslateY
  * @description 读取元素当前 transform 中的 translateY 位移。
@@ -84,6 +86,11 @@ function readElementTranslateY(element: HTMLElement): number {
   }
 }
 
+function readSlotLogicalTop(slotElement: HTMLElement): number {
+  const rect = slotElement.getBoundingClientRect();
+  return rect.top - readElementTranslateY(slotElement);
+}
+
 /**
  * @function getSlotMidpoint
  * @description 读取 slot 的逻辑中线位置。
@@ -94,8 +101,7 @@ function readElementTranslateY(element: HTMLElement): number {
  */
 function getSlotMidpoint(slotElement: HTMLDivElement): number {
   const rect = slotElement.getBoundingClientRect();
-  const visualShiftY = readElementTranslateY(slotElement);
-  const logicalTop = rect.top - visualShiftY;
+  const logicalTop = readSlotLogicalTop(slotElement);
   return logicalTop + rect.height / 2;
 }
 
@@ -335,7 +341,6 @@ export function ActivityBar(props: {
 
   useLayoutEffect(() => {
     const nextSlotTops: Record<string, number> = {};
-    const draggingId = draggingIconId ?? draggingPanelId;
     const iconsReordered = previousIconsRef.current !== activityBar.icons;
     previousIconsRef.current = activityBar.icons;
 
@@ -345,19 +350,7 @@ export function ActivityBar(props: {
         return;
       }
 
-      // During an active drag, clear ALL transforms so hover hit-testing reads
-      // the natural slot positions instead of FLIP-shifted visual positions.
-      // Otherwise adjacent target indices can oscillate while the pointer sits
-      // near a boundary, repeatedly calling onMoveIcon and eventually tripping
-      // React's "Maximum update depth exceeded" safeguard.
-      if (draggingId) {
-        slotElement.style.transition = "none";
-        slotElement.style.transform = "none";
-        nextSlotTops[icon.id] = slotElement.getBoundingClientRect().top;
-        return;
-      }
-
-      const nextTop = slotElement.getBoundingClientRect().top;
+      const nextTop = readSlotLogicalTop(slotElement);
       const previousTop = previousSlotTopsRef.current[icon.id];
       nextSlotTops[icon.id] = nextTop;
 
@@ -371,7 +364,7 @@ export function ActivityBar(props: {
       void slotElement.getBoundingClientRect();
 
       requestAnimationFrame(() => {
-        slotElement.style.transition = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
+        slotElement.style.transition = ACTIVITY_ICON_REORDER_TRANSITION;
         slotElement.style.transform = "translateY(0)";
       });
     });
@@ -555,6 +548,7 @@ export function ActivityBar(props: {
                 "layout-v2-activity-bar__icon-slot",
                 showSpacer ? "layout-v2-activity-bar__icon-slot--bottom-start" : "",
               ].filter(Boolean).join(" ")}
+              data-layout-icon-slot-id={icon.id}
               ref={(element) => {
                 slotRefs.current[icon.id] = element;
               }}
