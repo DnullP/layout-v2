@@ -690,6 +690,15 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             return;
         }
 
+        setReadyTabContentIds((previous) => {
+            if (!previous.has(session.tabId)) {
+                return previous;
+            }
+
+            const next = new Set(previous);
+            next.delete(session.tabId);
+            return next;
+        });
         isCommittingTabDropRef.current = true;
         store.replaceState({
             ...store.getState(),
@@ -1527,6 +1536,15 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         );
                         if (!committed) return;
 
+                        setReadyPanelContentIds((previous) => {
+                            if (!previous.has(session.panelId)) {
+                                return previous;
+                            }
+
+                            const next = new Set(previous);
+                            next.delete(session.panelId);
+                            return next;
+                        });
                         store.replaceState({
                             ...currentState,
                             root: committed.root,

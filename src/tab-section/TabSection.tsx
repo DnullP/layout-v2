@@ -247,6 +247,18 @@ function getCardToneClassName(tone: TabSectionTabDefinition["tone"]): string {
   return `layout-v2-tab-section__card--${tone}`;
 }
 
+function getTabSectionPreviewContentRect(tabSectionId: string): DOMRect | null {
+  if (typeof document === "undefined" || typeof CSS === "undefined" || typeof CSS.escape !== "function") {
+    return null;
+  }
+
+  const previewContent = document.querySelector<HTMLElement>(
+    `[data-layout-tab-preview-overlay='true'] .layout-v2-tab-section[data-tab-section-id='${CSS.escape(tabSectionId)}'] .layout-v2-tab-section__content`,
+  );
+
+  return previewContent?.getBoundingClientRect() ?? null;
+}
+
 /**
  * @function resolveTabCardBody
  * @description 解析当前 tab 的主体内容。
@@ -378,6 +390,12 @@ export function TabSection(props: {
   const draggingTabId = dragSession?.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
+  const isDraggingLoneSourceTab = Boolean(
+    dragSession?.phase === "dragging" &&
+    dragSession.sourceTabSectionId === tabSection.id &&
+    tabSection.tabs.length === 1 &&
+    tabSection.tabs[0]?.id === dragSession.tabId,
+  );
   const canPreviewRetargetContent = Boolean(
     allowContentPreview &&
     dragSession &&
@@ -575,7 +593,9 @@ export function TabSection(props: {
   }, [dragSession?.phase, tabSection.tabs]);
 
   useEffect(() => {
-    if ((!interactive && !canPreviewRetargetContent) || !dragSession || dragSession.phase !== "dragging") {
+    // A lone source tab is pre-destroyed in preview; after that, the survivor
+    // section owns hit-testing even while the committed source DOM still exists.
+    if (isDraggingLoneSourceTab || (!interactive && !canPreviewRetargetContent) || !dragSession || dragSession.phase !== "dragging") {
       if (hoverTargetClearFrameRef.current) {
         window.cancelAnimationFrame(hoverTargetClearFrameRef.current);
         hoverTargetClearFrameRef.current = 0;
@@ -584,7 +604,12 @@ export function TabSection(props: {
     }
 
     const stripRect = stripRef.current?.getBoundingClientRect() ?? null;
-    const contentRect = contentRef.current?.getBoundingClientRect() ?? null;
+    const committedContentRect = contentRef.current?.getBoundingClientRect() ?? null;
+    // Overlay preview reflects the pre-destroyed layout, so use it as the
+    // content hit-test bounds when retargeting into a non-source section.
+    const contentRect = dragSession.currentTabSectionId !== tabSection.id
+      ? getTabSectionPreviewContentRect(tabSection.id) ?? committedContentRect
+      : committedContentRect;
     const isCurrentSectionContentTarget = Boolean(
       dragSession.hoverTarget?.area === "content" &&
       dragSession.hoverTarget.tabSectionId === tabSection.id,
@@ -720,6 +745,7 @@ export function TabSection(props: {
     };
   }, [
     dragSession,
+    isDraggingLoneSourceTab,
     interactive,
     canPreviewRetargetContent,
     committedLeafSectionId,

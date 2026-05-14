@@ -335,10 +335,6 @@ export function arePreviewHoverTargetsEqual<TTarget extends PreviewHoverTargetBa
         left?.anchorLeafSectionId === right?.anchorLeafSectionId &&
         (left ? getContainerId(left) : undefined) === (right ? getContainerId(right) : undefined) &&
         left?.targetIndex === right?.targetIndex &&
-        left?.splitSide === right?.splitSide &&
-        left?.contentBounds?.left === right?.contentBounds?.left &&
-        left?.contentBounds?.top === right?.contentBounds?.top &&
-        left?.contentBounds?.right === right?.contentBounds?.right &&
-        left?.contentBounds?.bottom === right?.contentBounds?.bottom
+        left?.splitSide === right?.splitSide
     );
 }

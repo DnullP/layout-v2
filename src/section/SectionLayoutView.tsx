@@ -244,7 +244,7 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
             });
         };
 
-        const handlePointerUp = (): void => {
+        const finishResize = (): void => {
             if (rafId !== null) {
                 window.cancelAnimationFrame(rafId);
                 rafId = null;
@@ -261,11 +261,13 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
             setIsDragging(false);
             document.documentElement.removeAttribute("data-layout-resizing");
             window.removeEventListener("pointermove", handlePointerMove);
-            window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointerup", finishResize);
+            window.removeEventListener("pointercancel", finishResize);
         };
 
         window.addEventListener("pointermove", handlePointerMove);
-        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointerup", finishResize);
+        window.addEventListener("pointercancel", finishResize);
     }
 
     const dividerClassName = [
