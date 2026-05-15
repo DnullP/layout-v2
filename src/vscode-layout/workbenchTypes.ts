@@ -113,9 +113,9 @@ export interface WorkbenchApi {
     /** 激活指定 panel。 */
     activatePanel: (panelId: string) => void;
     /** 获取指定 tab 的信息。 */
-    getTab: (tabId: string) => { id: string; params: Record<string, unknown> } | null;
+    getTab: (tabId: string) => { id: string; title: string; component: string; params: Record<string, unknown> } | null;
     /** 获取所有 tab 的信息列表。 */
-    getTabs: () => Array<{ id: string; params: Record<string, unknown> }>;
+    getTabs: () => Array<{ id: string; title: string; component: string; params: Record<string, unknown> }>;
     /** 导出当前工作区主布局快照。 */
     exportLayoutSnapshot: () => WorkbenchLayoutSnapshot;
     /** 设置左侧边栏可见性。 */

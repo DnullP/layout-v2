@@ -904,6 +904,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
     const updateTab = useCallback((tabId: string, updates: Partial<WorkbenchTabDefinition>): void => {
         let replacedTabId: string | null = null;
+        let shouldTransferReadyState = false;
         store.updateState((currentState) => {
             const sectionId = findTabSectionIdByTabId(currentState.tabSections, tabId);
             if (!sectionId) {
@@ -943,6 +944,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 changed = true;
                 if (nextId !== tab.id) {
                     replacedTabId = nextId;
+                    shouldTransferReadyState = true;
                 }
                 return {
                     ...tab,
@@ -977,7 +979,15 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
         if (replacedTabId) {
             const nextTabId = replacedTabId;
+            const transferReadyState = shouldTransferReadyState;
             setReadyTabContentIds((previous) => {
+                if (transferReadyState && previous.has(tabId)) {
+                    const next = new Set(previous);
+                    next.delete(tabId);
+                    next.add(nextTabId);
+                    return next;
+                }
+
                 if (!previous.has(tabId) && !previous.has(nextTabId)) {
                     return previous;
                 }
@@ -1325,16 +1335,18 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             for (const section of Object.values(store.getState().tabSections.sections)) {
                 const tab = section.tabs.find((t) => t.id === tabId);
                 if (tab) {
-                    return { id: tab.id, params: readWorkbenchTabPayload(tab).params };
+                    const payload = readWorkbenchTabPayload(tab);
+                    return { id: tab.id, title: tab.title, component: payload.component, params: payload.params };
                 }
             }
             return null;
         },
         getTabs: () => {
-            const result: Array<{ id: string; params: Record<string, unknown> }> = [];
+            const result: Array<{ id: string; title: string; component: string; params: Record<string, unknown> }> = [];
             for (const section of Object.values(store.getState().tabSections.sections)) {
                 for (const tab of section.tabs) {
-                    result.push({ id: tab.id, params: readWorkbenchTabPayload(tab).params });
+                    const payload = readWorkbenchTabPayload(tab);
+                    result.push({ id: tab.id, title: tab.title, component: payload.component, params: payload.params });
                 }
             }
             return result;
