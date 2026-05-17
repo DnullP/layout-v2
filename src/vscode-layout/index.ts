@@ -12,7 +12,11 @@
 
 // --- 高层 API：声明式 Workbench ---
 export { VSCodeWorkbench, applyPersistedSectionRatios } from "./VSCodeWorkbench";
-export type { TabDragPreviewContentRenderContext, VSCodeWorkbenchProps } from "./VSCodeWorkbench";
+export type {
+    TabDragPreviewContentRenderContext,
+    WorkbenchExternalTabDragResolver,
+    VSCodeWorkbenchProps,
+} from "./VSCodeWorkbench";
 export type {
     WorkbenchActivityDefinition,
     WorkbenchPanelDefinition,

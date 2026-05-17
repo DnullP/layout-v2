@@ -12,12 +12,20 @@ import {
     useMemo,
     useRef,
     useState,
+    type DragEvent as ReactDragEvent,
     type ReactNode,
     type Ref,
 } from "react";
 import { findSectionNode, isSectionHidden, setSectionHidden, type SectionNode } from "../section/layoutModel";
 import { createSectionComponentBinding, createSectionComponentRegistry, getSectionComponentBinding, SectionComponentHost } from "../section/sectionComponent";
 import { SectionLayoutView } from "../section/SectionLayoutView";
+import {
+    arePreviewHoverTargetsEqual,
+    isPointerInsidePreviewBounds,
+    resolvePreviewAnchorLeafSectionId,
+    resolvePreviewSplitSide,
+    toPreviewStableBounds,
+} from "../section/previewSession";
 import { ActivityBar } from "../activity-bar/ActivityBar";
 import { ActivityBarDragPreview } from "../activity-bar/ActivityBarDragPreview";
 import { type ActivityBarDragSession } from "../activity-bar/activityBarDrag";
@@ -40,7 +48,7 @@ import {
 import { TabSection, TabDragSessionContext } from "../tab-section/TabSection";
 import type { TabSectionInactiveContentPolicy } from "../tab-section/TabSection";
 import { TabSectionDragPreview } from "../tab-section/TabSectionDragPreview";
-import { type TabSectionDragSession } from "../tab-section/tabSectionDrag";
+import { type TabSectionDragSession, type TabSectionHoverTarget } from "../tab-section/tabSectionDrag";
 import { type TabSectionTabDefinition, type TabSectionTabMove, type TabSectionsState } from "../tab-section/tabSectionModel";
 import { createVSCodeLayoutStore, useVSCodeLayoutStoreState, type VSCodeLayoutState, type VSCodeLayoutStore } from "./store";
 import {
@@ -114,6 +122,17 @@ export interface TabDragPreviewContentRenderContext {
 }
 
 /**
+ * @interface WorkbenchExternalTabDragResolver
+ * @description 让宿主把外部 HTML5 拖拽解析为 workbench tab，用于文件树等非 tab 来源触发 tab split preview。
+ */
+export interface WorkbenchExternalTabDragResolver {
+    /** 快速判断当前 drag event 是否属于可打开为 tab 的外部来源。 */
+    canAccept: (event: DragEvent) => boolean;
+    /** 将当前 drag/drop 解析为 tab 定义；可异步读取宿主数据。 */
+    resolveTab: (event: DragEvent) => WorkbenchTabDefinition | null | Promise<WorkbenchTabDefinition | null>;
+}
+
+/**
  * @function renderDefaultTabDragPreviewContent
  * @description 渲染默认的轻量 tab 拖拽预览占位内容。
  * @param tab 当前预览 tab 定义。
@@ -125,6 +144,212 @@ function renderDefaultTabDragPreviewContent(tab: TabSectionTabDefinition): React
             Preview: {tab.title}
         </div>
     );
+}
+
+const EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID = "__layout-v2-external-tab-drag-source";
+const EXTERNAL_TAB_DRAG_POINTER_ID = -1001;
+
+function createWorkbenchTabSectionTabDefinition(tab: WorkbenchTabDefinition): TabSectionTabDefinition {
+    return {
+        id: tab.id,
+        title: tab.title,
+        type: "workbench-tab",
+        payload: { component: tab.component, params: tab.params ?? {} } satisfies WorkbenchTabPayload,
+        content: `Component: ${tab.component}`,
+        tone: "neutral",
+    };
+}
+
+function isExternalTabDragSession(session: TabSectionDragSession | null | undefined): boolean {
+    return session?.sourceTabSectionId === EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID;
+}
+
+function withExternalTabDragSource(
+    state: TabSectionsState,
+    tab: TabSectionTabDefinition | null,
+    session: TabSectionDragSession | null | undefined,
+): TabSectionsState {
+    if (!tab || !isExternalTabDragSession(session)) {
+        return state;
+    }
+
+    return {
+        sections: {
+            ...state.sections,
+            [EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID]: {
+                id: EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID,
+                tabs: [tab],
+                focusedTabId: tab.id,
+                isRoot: false,
+            },
+        },
+    };
+}
+
+function withoutExternalTabDragSource(state: TabSectionsState): TabSectionsState {
+    if (!state.sections[EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID]) {
+        return state;
+    }
+
+    const nextSections = { ...state.sections };
+    delete nextSections[EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID];
+    return { sections: nextSections };
+}
+
+function getTabHoverTargetContainerId(target: TabSectionHoverTarget): string {
+    return target.tabSectionId;
+}
+
+function areEquivalentTabHoverTargets(
+    left: TabSectionHoverTarget | null,
+    right: TabSectionHoverTarget | null,
+): boolean {
+    return arePreviewHoverTargetsEqual(left, right, getTabHoverTargetContainerId);
+}
+
+function readElementTranslateX(element: HTMLElement): number {
+    const transform = window.getComputedStyle(element).transform;
+    if (!transform || transform === "none") {
+        return 0;
+    }
+
+    try {
+        return new DOMMatrixReadOnly(transform).m41;
+    } catch {
+        return 0;
+    }
+}
+
+function getSlotMidpointX(slotElement: HTMLElement): number {
+    const rect = slotElement.getBoundingClientRect();
+    const logicalLeft = rect.left - readElementTranslateX(slotElement);
+    return logicalLeft + rect.width / 2;
+}
+
+function resolveExternalTabTargetIndex(
+    tabSectionElement: HTMLElement,
+    pointerX: number,
+): number {
+    const slots = Array.from(
+        tabSectionElement.querySelectorAll<HTMLElement>(".layout-v2-tab-section__tab-slot"),
+    );
+
+    for (let index = 0; index < slots.length; index += 1) {
+        const slot = slots[index];
+        if (slot && pointerX < getSlotMidpointX(slot)) {
+            return index;
+        }
+    }
+
+    return slots.length;
+}
+
+function resolveExternalTabHoverTarget(params: {
+    event: DragEvent;
+    rootElement: HTMLElement | null;
+    tabSections: TabSectionsState;
+    currentTarget: TabSectionHoverTarget | null;
+}): TabSectionHoverTarget | null {
+    const eventTarget = params.event.target as HTMLElement | null;
+    const tabSectionElement = eventTarget?.closest<HTMLElement>(".layout-v2-tab-section") ?? null;
+    if (!params.rootElement || !tabSectionElement || !params.rootElement.contains(tabSectionElement)) {
+        return null;
+    }
+
+    const tabSectionId = tabSectionElement.getAttribute("data-tab-section-id")
+        ?? tabSectionElement.getAttribute("data-layout-tab-section-id");
+    if (!tabSectionId || !params.tabSections.sections[tabSectionId]) {
+        return null;
+    }
+
+    const leafElement = tabSectionElement.closest<HTMLElement>(".layout-v2__leaf-shell");
+    const leafSectionId = leafElement?.getAttribute("data-section-id");
+    if (!leafSectionId) {
+        return null;
+    }
+
+    const stripElement = tabSectionElement.querySelector<HTMLElement>(".layout-v2-tab-section__strip");
+    const stripRect = stripElement?.getBoundingClientRect() ?? null;
+    if (
+        stripRect &&
+        params.event.clientX >= stripRect.left &&
+        params.event.clientX <= stripRect.right &&
+        params.event.clientY >= stripRect.top &&
+        params.event.clientY <= stripRect.bottom
+    ) {
+        return {
+            area: "strip",
+            leafSectionId,
+            anchorLeafSectionId: leafSectionId,
+            tabSectionId,
+            targetIndex: resolveExternalTabTargetIndex(tabSectionElement, params.event.clientX),
+        };
+    }
+
+    const contentElement = tabSectionElement.querySelector<HTMLElement>(".layout-v2-tab-section__content");
+    const contentBounds = toPreviewStableBounds(contentElement?.getBoundingClientRect() ?? null);
+    if (!isPointerInsidePreviewBounds(contentBounds, params.event.clientX, params.event.clientY)) {
+        return null;
+    }
+
+    const isCurrentSectionContentTarget = Boolean(
+        params.currentTarget?.area === "content" &&
+        params.currentTarget.tabSectionId === tabSectionId,
+    );
+    return {
+        area: "content",
+        leafSectionId,
+        anchorLeafSectionId: resolvePreviewAnchorLeafSectionId({
+            currentTarget: params.currentTarget,
+            isCurrentSectionContentTarget,
+            committedLeafSectionId: leafSectionId,
+        }),
+        tabSectionId,
+        splitSide: contentBounds
+            ? resolvePreviewSplitSide(
+                contentBounds,
+                params.event.clientX,
+                params.event.clientY,
+                {
+                    left: "left",
+                    right: "right",
+                    top: "top",
+                    bottom: "bottom",
+                } as const,
+                {
+                    currentSplitSide: isCurrentSectionContentTarget
+                        ? params.currentTarget?.splitSide ?? null
+                        : null,
+                },
+            )
+            : null,
+        contentBounds: contentBounds ?? undefined,
+    };
+}
+
+function buildExternalTabDragSession(
+    tab: TabSectionTabDefinition,
+    hoverTarget: TabSectionHoverTarget,
+    pointerX: number,
+    pointerY: number,
+): TabSectionDragSession {
+    return {
+        sourceTabSectionId: EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID,
+        currentTabSectionId: EXTERNAL_TAB_DRAG_SOURCE_SECTION_ID,
+        sourceLeafSectionId: hoverTarget.anchorLeafSectionId ?? hoverTarget.leafSectionId,
+        currentLeafSectionId: hoverTarget.leafSectionId,
+        tabId: tab.id,
+        title: tab.title,
+        content: tab.content,
+        tone: tab.tone,
+        pointerId: EXTERNAL_TAB_DRAG_POINTER_ID,
+        originX: pointerX,
+        originY: pointerY,
+        pointerX,
+        pointerY,
+        phase: "dragging",
+        hoverTarget,
+    };
 }
 
 export interface VSCodeWorkbenchProps {
@@ -169,6 +394,8 @@ export interface VSCodeWorkbenchProps {
         tab: TabSectionTabDefinition,
         context: TabDragPreviewContentRenderContext,
     ) => ReactNode;
+    /** 将外部 HTML5 拖拽解析为 tab，并复用 workbench tab 预览/分屏落点逻辑。 */
+    externalTabDragResolver?: WorkbenchExternalTabDragResolver;
 
     /** 渲染 activity bar icon。 */
     renderActivityIcon?: (activity: WorkbenchActivityDefinition) => ReactNode;
@@ -537,6 +764,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         renderTabContentInDragPreviewLayout = true,
         renderPanelContentInDragPreviewLayout = true,
         renderTabDragPreviewContent,
+        externalTabDragResolver,
         renderActivityIcon,
         renderPanelContent,
         renderTabTitle,
@@ -576,8 +804,15 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const [activityBarDragSession, setActivityBarDragSession] = useState<ActivityBarDragSession | null>(null);
     const [panelDragSession, setPanelDragSession] = useState<PanelSectionDragSession | null>(null);
     const [tabDragSession, setTabDragSession] = useState<TabSectionDragSession | null>(null);
+    const [externalTabDragTab, setExternalTabDragTab] = useState<TabSectionTabDefinition | null>(null);
     const committedTabDragSessionKeyRef = useRef<string | null>(null);
     const isCommittingTabDropRef = useRef(false);
+    const layoutRootRef = useRef<HTMLDivElement | null>(null);
+    const externalTabDragTabRef = useRef<TabSectionTabDefinition | null>(null);
+    const externalTabDragResolveTokenRef = useRef(0);
+    const externalTabDragResolvePendingRef = useRef(false);
+    const externalTabDragHoverTargetRef = useRef<TabSectionHoverTarget | null>(null);
+    const externalTabDragLastPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
     const [readyTabContentIds, setReadyTabContentIds] = useState<ReadonlySet<string>>(() => new Set());
     const [readyPanelContentIds, setReadyPanelContentIds] = useState<ReadonlySet<string>>(() => new Set());
     const livePanelDragSession = panelDragSession && !isEndedPanelSectionDragSession(panelDragSession)
@@ -854,14 +1089,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     // --- Tab operations ---
     const openTab = useCallback((tab: WorkbenchTabDefinition): void => {
         store.updateState((currentState) => {
-            const nextTab: TabSectionTabDefinition = {
-                id: tab.id,
-                title: tab.title,
-                type: "workbench-tab",
-                payload: { component: tab.component, params: tab.params ?? {} } satisfies WorkbenchTabPayload,
-                content: `Component: ${tab.component}`,
-                tone: "neutral",
-            };
+            const nextTab = createWorkbenchTabSectionTabDefinition(tab);
 
             // Check all sections — if the tab already exists somewhere, focus it there.
             const existingSectionId = findTabSectionIdByTabId(currentState.tabSections, tab.id);
@@ -1272,6 +1500,215 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         return () => window.removeEventListener("keydown", handleWindowKeyDown, true);
     }, [activeTabId, closeTab]);
 
+    const updateExternalTabDragTab = useCallback((tab: TabSectionTabDefinition | null): void => {
+        externalTabDragTabRef.current = tab;
+        setExternalTabDragTab(tab);
+    }, []);
+
+    const clearExternalTabDrag = useCallback((): void => {
+        externalTabDragResolveTokenRef.current += 1;
+        externalTabDragResolvePendingRef.current = false;
+        externalTabDragHoverTargetRef.current = null;
+        updateExternalTabDragTab(null);
+        setTabDragSession((currentSession) => (
+            isExternalTabDragSession(currentSession) ? null : currentSession
+        ));
+    }, [updateExternalTabDragTab]);
+
+    const updateExternalTabDragSession = useCallback((
+        tab: TabSectionTabDefinition,
+        hoverTarget: TabSectionHoverTarget,
+        pointerX: number,
+        pointerY: number,
+    ): void => {
+        const nextSession = buildExternalTabDragSession(tab, hoverTarget, pointerX, pointerY);
+        setTabDragSession((currentSession) => {
+            if (
+                isExternalTabDragSession(currentSession) &&
+                currentSession?.tabId === nextSession.tabId &&
+                currentSession.pointerX === nextSession.pointerX &&
+                currentSession.pointerY === nextSession.pointerY &&
+                areEquivalentTabHoverTargets(currentSession.hoverTarget, nextSession.hoverTarget)
+            ) {
+                return currentSession;
+            }
+
+            return nextSession;
+        });
+    }, []);
+
+    const requestExternalTabDragTab = useCallback((event: DragEvent): void => {
+        if (!externalTabDragResolver || externalTabDragTabRef.current || externalTabDragResolvePendingRef.current) {
+            return;
+        }
+
+        const requestToken = externalTabDragResolveTokenRef.current + 1;
+        externalTabDragResolveTokenRef.current = requestToken;
+        externalTabDragResolvePendingRef.current = true;
+
+        Promise.resolve(externalTabDragResolver.resolveTab(event))
+            .then((resolvedTab) => {
+                if (externalTabDragResolveTokenRef.current !== requestToken) {
+                    return;
+                }
+
+                externalTabDragResolvePendingRef.current = false;
+                if (!resolvedTab) {
+                    return;
+                }
+
+                const tab = createWorkbenchTabSectionTabDefinition(resolvedTab);
+                updateExternalTabDragTab(tab);
+                const hoverTarget = externalTabDragHoverTargetRef.current;
+                if (!hoverTarget) {
+                    return;
+                }
+
+                updateExternalTabDragSession(
+                    tab,
+                    hoverTarget,
+                    externalTabDragLastPointerRef.current.x,
+                    externalTabDragLastPointerRef.current.y,
+                );
+            })
+            .catch((error) => {
+                if (externalTabDragResolveTokenRef.current !== requestToken) {
+                    return;
+                }
+
+                externalTabDragResolvePendingRef.current = false;
+                console.warn("[layout-v2] external tab drag resolve failed", {
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            });
+    }, [externalTabDragResolver, updateExternalTabDragSession, updateExternalTabDragTab]);
+
+    const commitExternalTabDragSession = useCallback((
+        tab: TabSectionTabDefinition,
+        session: TabSectionDragSession,
+    ): void => {
+        const currentState = store.getState();
+        const tabSectionsWithExternalSource = withExternalTabDragSource(
+            currentState.tabSections,
+            tab,
+            session,
+        );
+        const committed = commitTabWorkbenchDrop(
+            currentState.root,
+            tabSectionsWithExternalSource,
+            session,
+            workbenchTabAdapter,
+        );
+        if (!committed) {
+            return;
+        }
+
+        isCommittingTabDropRef.current = true;
+        store.replaceState({
+            ...currentState,
+            root: committed.root,
+            tabSections: withoutExternalTabDragSource(committed.state),
+            workbench: { activeGroupId: committed.activeTabSectionId },
+        });
+    }, [store]);
+
+    const handleExternalTabDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {
+        if (!externalTabDragResolver?.canAccept(event.nativeEvent)) {
+            return;
+        }
+
+        const hoverTarget = resolveExternalTabHoverTarget({
+            event: event.nativeEvent,
+            rootElement: layoutRootRef.current,
+            tabSections: state.tabSections,
+            currentTarget: externalTabDragHoverTargetRef.current,
+        });
+        if (!hoverTarget) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+
+        externalTabDragHoverTargetRef.current = hoverTarget;
+        externalTabDragLastPointerRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+        };
+
+        const tab = externalTabDragTabRef.current;
+        if (tab) {
+            updateExternalTabDragSession(tab, hoverTarget, event.clientX, event.clientY);
+            return;
+        }
+
+        requestExternalTabDragTab(event.nativeEvent);
+    }, [externalTabDragResolver, requestExternalTabDragTab, state.tabSections, updateExternalTabDragSession]);
+
+    const handleExternalTabDrop = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {
+        if (!externalTabDragResolver?.canAccept(event.nativeEvent)) {
+            return;
+        }
+
+        const hoverTarget = resolveExternalTabHoverTarget({
+            event: event.nativeEvent,
+            rootElement: layoutRootRef.current,
+            tabSections: state.tabSections,
+            currentTarget: externalTabDragHoverTargetRef.current,
+        });
+        if (!hoverTarget) {
+            clearExternalTabDrag();
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+
+        const nativeEvent = event.nativeEvent;
+        const pointerX = event.clientX;
+        const pointerY = event.clientY;
+        const existingTab = externalTabDragTabRef.current;
+
+        const tabPromise = existingTab
+            ? Promise.resolve(existingTab)
+            : Promise.resolve(externalTabDragResolver.resolveTab(nativeEvent)).then((resolvedTab) =>
+                resolvedTab ? createWorkbenchTabSectionTabDefinition(resolvedTab) : null,
+            );
+
+        void tabPromise.then((tab) => {
+            if (!tab) {
+                return;
+            }
+
+            commitExternalTabDragSession(
+                tab,
+                buildExternalTabDragSession(tab, hoverTarget, pointerX, pointerY),
+            );
+        }).catch((error) => {
+            console.warn("[layout-v2] external tab drop failed", {
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }).finally(() => {
+            clearExternalTabDrag();
+        });
+    }, [
+        clearExternalTabDrag,
+        commitExternalTabDragSession,
+        externalTabDragResolver,
+        state.tabSections,
+    ]);
+
+    const handleExternalTabDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {
+        const relatedTarget = event.relatedTarget as Node | null;
+        if (relatedTarget && event.currentTarget.contains(relatedTarget)) {
+            return;
+        }
+
+        clearExternalTabDrag();
+    }, [clearExternalTabDrag]);
+
     // --- Build panel context ---
     const buildPanelContext = useCallback((hostPanelId: string | null): WorkbenchPanelContext => ({
         activeTabId,
@@ -1290,12 +1727,16 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
     // --- Tab DnD preview ---
     const effectiveTabDragSession = isCommittingTabDropRef.current ? null : tabDragSession;
+    const tabSectionsForTabPreview = useMemo(
+        () => withExternalTabDragSource(state.tabSections, externalTabDragTab, effectiveTabDragSession),
+        [state.tabSections, externalTabDragTab, effectiveTabDragSession?.sourceTabSectionId, effectiveTabDragSession?.tabId],
+    );
     const tabPreview = useMemo(
         () => renderTabDragPreviewLayout
-            ? buildTabWorkbenchPreviewState(layoutRoot, state.tabSections, effectiveTabDragSession, workbenchTabAdapter)
+            ? buildTabWorkbenchPreviewState(layoutRoot, tabSectionsForTabPreview, effectiveTabDragSession, workbenchTabAdapter)
             : null,
         // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
-        [renderTabDragPreviewLayout, layoutRoot, state.tabSections, effectiveTabDragSession?.phase, effectiveTabDragSession?.hoverTarget],
+        [renderTabDragPreviewLayout, layoutRoot, tabSectionsForTabPreview, effectiveTabDragSession?.phase, effectiveTabDragSession?.hoverTarget],
     );
     const shouldRenderTabPreviewOverlay = Boolean(tabPreview && tabDragPreviewRenderMode === "overlay");
     const shouldRenderInlineTabPreview = !shouldRenderTabPreviewOverlay;
@@ -1651,6 +2092,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     deferTabContentPresentation={deferTabContentPresentation}
                     isTabContentReady={(tab) => readyTabContentIds.has(tab.id)}
                     preserveActiveTabContentDuringDrag={preserveActiveTabContentDuringDrag}
+                    renderDraggedTabPlaceholder={!shouldRenderTabPreviewOverlay}
                     onDragSessionChange={setTabDragSession}
                     onDragSessionEnd={commitTabDragSession}
                     onFocusTab={setActiveTab}
@@ -1674,6 +2116,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         readyTabContentIds,
         markTabContentReady,
         renderTabDragPreviewLayout,
+        shouldRenderTabPreviewOverlay,
         tabDragPreviewRenderMode,
         preserveActiveTabContentDuringDrag,
         renderTabContentInDragPreviewLayout,
@@ -1749,12 +2192,20 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     return (
         <TabDragSessionContext.Provider value={effectiveTabDragSession}>
         <div
+            ref={layoutRootRef}
             className={className}
             style={{ width: "100%", height: "100%", position: "relative" }}
             role="main"
             aria-label="Dockview Main Area"
             data-testid="main-dockview-host"
             data-layout-tab-preview-render-mode={shouldRenderTabPreviewOverlay ? "overlay" : "inline"}
+            onDragEnterCapture={handleExternalTabDragOver}
+            onDragEnter={handleExternalTabDragOver}
+            onDragOverCapture={handleExternalTabDragOver}
+            onDragOver={handleExternalTabDragOver}
+            onDropCapture={handleExternalTabDrop}
+            onDrop={handleExternalTabDrop}
+            onDragLeave={handleExternalTabDragLeave}
         >
             <SectionLayoutView
                 root={renderedRoot}
@@ -1765,6 +2216,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             />
             {shouldRenderTabPreviewOverlay && tabPreview ? (
                 <div
+                    className="layout-v2-tab-preview-overlay"
                     aria-hidden="true"
                     data-layout-tab-preview-overlay="true"
                     style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 20 }}

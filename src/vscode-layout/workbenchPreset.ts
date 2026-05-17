@@ -22,6 +22,7 @@ import {
 import { createActivityBarState, type ActivityBarsState, type ActivityBarIconDefinition } from "../activity-bar/activityBarModel";
 import { createVSCodeLayoutState, type VSCodeLayoutState } from "./store";
 import { createPanelSectionsState } from "../panel-section/panelSectionModel";
+import { applyPanelSectionCollapsedFixedSize } from "../panel-section/panelSectionLayout";
 import { createTabSectionsState, type TabSectionStateItem, type TabSectionTabDefinition } from "../tab-section/tabSectionModel";
 import type { PanelSectionPanelDefinition, PanelSectionStateItem } from "../panel-section/panelSectionModel";
 import type { WorkbenchActivityDefinition, WorkbenchPanelDefinition, WorkbenchTabDefinition } from "./workbenchTypes";
@@ -436,7 +437,11 @@ function restoreWorkbenchTabSubtrees(
 }
 
 function collectPanelSectionIds(root: SectionNode<WorkbenchSectionData>): Set<string> {
-    const ids = new Set<string>();
+    return new Set(collectPanelSectionLeafIds(root).keys());
+}
+
+function collectPanelSectionLeafIds(root: SectionNode<WorkbenchSectionData>): Map<string, string> {
+    const ids = new Map<string, string>();
     const queue: SectionNode<WorkbenchSectionData>[] = [root];
 
     while (queue.length > 0) {
@@ -457,11 +462,30 @@ function collectPanelSectionIds(root: SectionNode<WorkbenchSectionData>): Set<st
 
         const panelSectionId = (binding.props as { panelSectionId?: unknown }).panelSectionId;
         if (typeof panelSectionId === "string" && panelSectionId.trim()) {
-            ids.add(panelSectionId);
+            ids.set(panelSectionId, current.id);
         }
     }
 
     return ids;
+}
+
+function normalizePanelSectionCollapsedFixedSizes(
+    root: SectionNode<WorkbenchSectionData>,
+    sections: Iterable<Pick<PanelSectionStateItem, "id" | "isCollapsed">>,
+): SectionNode<WorkbenchSectionData> {
+    const panelSectionLeafIds = collectPanelSectionLeafIds(root);
+    let nextRoot = root;
+
+    for (const section of sections) {
+        const leafSectionId = panelSectionLeafIds.get(section.id);
+        if (!leafSectionId) {
+            continue;
+        }
+
+        nextRoot = applyPanelSectionCollapsedFixedSize(nextRoot, leafSectionId, section.isCollapsed);
+    }
+
+    return nextRoot;
 }
 
 /**
@@ -554,15 +578,21 @@ function normalizeWorkbenchLayoutTab(value: unknown): WorkbenchTabDefinition | n
 export function exportWorkbenchPanelLayoutSnapshot(
     state: VSCodeLayoutState<WorkbenchSectionData>,
 ): WorkbenchPanelLayoutSnapshot {
-    return {
-        root: clonePanelLayoutSectionNode(state.root),
-        sections: Object.values(state.panelSections.sections).map((section) => ({
+    const panelRoot = clonePanelLayoutSectionNode(state.root);
+    const panelSectionIds = collectPanelSectionIds(panelRoot);
+    const sections = Object.values(state.panelSections.sections)
+        .filter((section) => panelSectionIds.has(section.id))
+        .map((section) => ({
             id: section.id,
             panelIds: section.panels.map((panel) => panel.id),
             focusedPanelId: section.focusedPanelId,
             isCollapsed: section.isCollapsed,
             isRoot: section.isRoot,
-        })),
+        }));
+
+    return {
+        root: normalizePanelSectionCollapsedFixedSizes(panelRoot, sections),
+        sections,
     };
 }
 
@@ -685,9 +715,11 @@ export function applyWorkbenchPanelLayoutSnapshot(
         }
     }
 
+    const restoredRoot = normalizePanelSectionCollapsedFixedSizes(root, restoredSections.values());
+
     return {
         ...state,
-        root: restoreWorkbenchTabSubtrees(root, state.root),
+        root: restoreWorkbenchTabSubtrees(restoredRoot, state.root),
         panelSections: createPanelSectionsState(Array.from(restoredSections.values())),
     };
 }

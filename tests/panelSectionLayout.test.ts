@@ -3,6 +3,7 @@ import {
     applyPanelSectionCollapsedLayout,
     focusPanelSectionWithLayout,
     PANEL_SECTION_COLLAPSED_BAR_SIZE,
+    PANEL_SECTION_COLLAPSED_RAIL_SIZE,
 } from "../src/panel-section/panelSectionLayout";
 import {
     createPanelSectionsState,
@@ -46,7 +47,7 @@ function createDraft(
 }
 
 describe("panelSectionLayout", () => {
-    test("横向父 split 中折叠 panel section 时应保留 sidebar 宽度并清理旧 fixed size", () => {
+    test("横向父 split 中折叠 panel section 时应只保留 panel bar 宽度", () => {
         let root = createRootSection<TestBindingData>(
             createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),
         );
@@ -87,7 +88,7 @@ describe("panelSectionLayout", () => {
 
         const collapsedLeaf = findSectionNode(collapsed.root, "sidebar-leaf");
         expect(collapsed.state.sections["sidebar-panels"]?.isCollapsed).toBe(true);
-        expect(collapsedLeaf?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
+        expect(collapsedLeaf?.meta?.["layout-v2:fixedSize"]).toBe(PANEL_SECTION_COLLAPSED_RAIL_SIZE);
         expect(findSectionNode(collapsed.root, "main-leaf")).toBeTruthy();
 
         const expanded = applyPanelSectionCollapsedLayout(collapsed.root, collapsed.state, {

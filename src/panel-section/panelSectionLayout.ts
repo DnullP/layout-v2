@@ -28,6 +28,7 @@ import {
 } from "./panelSectionModel";
 
 export const PANEL_SECTION_COLLAPSED_BAR_SIZE = 38;
+export const PANEL_SECTION_COLLAPSED_RAIL_SIZE = 120;
 
 /**
  * @function clearPanelSectionFixedSize
@@ -65,9 +66,8 @@ function getPanelSectionParentSplitDirection<T>(
 
 /**
  * @function applyPanelSectionCollapsedFixedSize
- * @description 按父 split 方向同步 collapsed panel leaf 的固定尺寸：
- *   横向父 split 需要清理 fixed size，避免 sidebar 被挤窄；纵向父 split 需要固定为 strip 高度，
- *   让折叠 section 把纵向空间让给仍有内容的 sibling section。
+ * @description 同步 collapsed panel leaf 的固定尺寸，让折叠 section 只保留可操作的 panel bar/rail 占位，
+ *   并把剩余空间交还给 sibling section。
  * @param root section tree 根节点。
  * @param leafSectionId 目标 leaf section id。
  * @param isCollapsed 目标 panel section 是否折叠。
@@ -83,13 +83,15 @@ export function applyPanelSectionCollapsedFixedSize<T>(
     }
 
     const parentDirection = getPanelSectionParentSplitDirection(root, leafSectionId);
-    if (parentDirection !== "vertical") {
+    if (!parentDirection) {
         return clearPanelSectionFixedSize(root, leafSectionId);
     }
 
     return updateSectionMetadata(root, leafSectionId, (metadata) => ({
         ...metadata,
-        [SECTION_FIXED_SIZE_META_KEY]: PANEL_SECTION_COLLAPSED_BAR_SIZE,
+        [SECTION_FIXED_SIZE_META_KEY]: parentDirection === "horizontal"
+            ? PANEL_SECTION_COLLAPSED_RAIL_SIZE
+            : PANEL_SECTION_COLLAPSED_BAR_SIZE,
     }));
 }
 

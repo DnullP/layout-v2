@@ -307,6 +307,7 @@ export function TabSection(props: {
   deferTabContentPresentation?: TabSectionPresentationPolicy;
   isTabContentReady?: TabSectionContentReadyResolver;
   preserveActiveTabContentDuringDrag?: boolean;
+  renderDraggedTabPlaceholder?: boolean;
   onDragSessionChange?: (session: TabSectionDragSession | null) => void;
   onDragSessionEnd?: (session: TabSectionDragSession) => void;
   onFocusTab: (tabId: string) => void;
@@ -330,6 +331,7 @@ export function TabSection(props: {
     deferTabContentPresentation,
     isTabContentReady,
     preserveActiveTabContentDuringDrag = false,
+    renderDraggedTabPlaceholder = true,
     onDragSessionChange,
     onDragSessionEnd,
     onFocusTab,
@@ -387,7 +389,7 @@ export function TabSection(props: {
   const isActiveCardReadyForPresentation = activeCard
     ? isTabReadyForPresentation(activeCard)
     : false;
-  const draggingTabId = dragSession?.currentTabSectionId === tabSection.id
+  const draggingTabId = renderDraggedTabPlaceholder && dragSession?.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
   const isDraggingLoneSourceTab = Boolean(

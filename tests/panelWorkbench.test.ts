@@ -28,7 +28,10 @@ import {
   type WorkbenchActivityDefinition,
   type WorkbenchPanelDefinition,
 } from "../src";
-import { PANEL_SECTION_COLLAPSED_BAR_SIZE } from "../src/panel-section/panelSectionLayout";
+import {
+  PANEL_SECTION_COLLAPSED_BAR_SIZE,
+  PANEL_SECTION_COLLAPSED_RAIL_SIZE,
+} from "../src/panel-section/panelSectionLayout";
 
 interface TestBindingData extends SectionComponentData {
   role: "root" | "sidebar" | "container";
@@ -1173,7 +1176,7 @@ describe("workbench panel layout snapshot persistence", () => {
     ).toHaveLength(1);
   });
 
-  test("collapsed panel layout restore clears legacy fixed size while preserving the leaf", () => {
+  test("collapsed panel layout restore normalizes legacy fixed size while preserving the leaf", () => {
     const baseState = createWorkbenchLayoutState({
       activities,
       panels,
@@ -1234,7 +1237,7 @@ describe("workbench panel layout snapshot persistence", () => {
 
     expect(restoredState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]?.isCollapsed).toBe(true);
     expect(restoredLeft).toBeTruthy();
-    expect(restoredLeft?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
+    expect(restoredLeft?.meta?.["layout-v2:fixedSize"]).toBe(PANEL_SECTION_COLLAPSED_RAIL_SIZE);
   });
 
   test("collapsed panel layout restore fixes vertical split leaf to the strip height", () => {

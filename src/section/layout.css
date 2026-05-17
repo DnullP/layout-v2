@@ -89,6 +89,11 @@
     display: flex;
 }
 
+.layout-v2-tab-preview-overlay,
+.layout-v2-tab-preview-overlay * {
+    pointer-events: none !important;
+}
+
 .layout-v2__divider {
     position: relative;
     flex-shrink: 0;
