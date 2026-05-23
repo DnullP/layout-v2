@@ -30,7 +30,6 @@ import {
 } from "../src";
 import {
   PANEL_SECTION_COLLAPSED_BAR_SIZE,
-  PANEL_SECTION_COLLAPSED_RAIL_SIZE,
 } from "../src/panel-section/panelSectionLayout";
 
 interface TestBindingData extends SectionComponentData {
@@ -1237,7 +1236,7 @@ describe("workbench panel layout snapshot persistence", () => {
 
     expect(restoredState.panelSections.sections[WORKBENCH_LEFT_PANEL_SECTION_ID]?.isCollapsed).toBe(true);
     expect(restoredLeft).toBeTruthy();
-    expect(restoredLeft?.meta?.["layout-v2:fixedSize"]).toBe(PANEL_SECTION_COLLAPSED_RAIL_SIZE);
+    expect(restoredLeft?.meta?.["layout-v2:fixedSize"]).toBeUndefined();
   });
 
   test("collapsed panel layout restore fixes vertical split leaf to the strip height", () => {
