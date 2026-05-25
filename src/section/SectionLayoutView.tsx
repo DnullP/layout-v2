@@ -112,9 +112,18 @@ function resolveDomFlexResizeSlots(
 function applyDomFlexResizeRatio(
     slots: { firstSlot: HTMLElement; secondSlot: HTMLElement },
     ratio: number,
+    totalSize?: number,
 ): void {
-    slots.firstSlot.style.flex = `${ratio} 1 0%`;
-    slots.secondSlot.style.flex = `${1 - ratio} 1 0%`;
+    if (typeof totalSize === "number" && Number.isFinite(totalSize) && totalSize > 0) {
+        const firstBasis = Math.round(ratio * totalSize * 10) / 10;
+        const secondBasis = Math.round((totalSize - firstBasis) * 10) / 10;
+        slots.firstSlot.style.flex = `0 0 ${firstBasis}px`;
+        slots.secondSlot.style.flex = `0 0 ${secondBasis}px`;
+        return;
+    }
+
+    slots.firstSlot.style.flex = `0 0 ${ratio * 100}%`;
+    slots.secondSlot.style.flex = `0 0 ${(1 - ratio) * 100}%`;
 }
 
 function findSectionNodeById<T>(
@@ -264,7 +273,7 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
         let lastPointer = startPointer;
         const applyResize = (nextRatio: number): void => {
             if (domFlexResizeSlots) {
-                applyDomFlexResizeRatio(domFlexResizeSlots, nextRatio);
+                applyDomFlexResizeRatio(domFlexResizeSlots, nextRatio, totalSize);
                 return;
             }
 
@@ -301,7 +310,7 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
                 minSectionSize,
             );
             if (domFlexResizeSlots) {
-                applyDomFlexResizeRatio(domFlexResizeSlots, finalRatio);
+                applyDomFlexResizeRatio(domFlexResizeSlots, finalRatio, totalSize);
             }
             onResize(finalRatio);
 
