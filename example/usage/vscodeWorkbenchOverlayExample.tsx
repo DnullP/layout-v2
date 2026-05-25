@@ -6,6 +6,16 @@
 import { type ReactNode } from "react";
 import { VSCodeWorkbench } from "../../src/vscode-layout/VSCodeWorkbench";
 
+declare global {
+    interface Window {
+        __LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__?: {
+            sectionRatio: number;
+            layoutSnapshot: number;
+            panelLayout: number;
+        };
+    }
+}
+
 function renderTabContent(title: string): ReactNode {
     return (
         <div style={{ padding: 16 }}>
@@ -18,6 +28,14 @@ function renderTabContent(title: string): ReactNode {
 }
 
 export function VSCodeWorkbenchOverlayUsageExample(): ReactNode {
+    if (!window.__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__) {
+        window.__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__ = {
+            sectionRatio: 0,
+            layoutSnapshot: 0,
+            panelLayout: 0,
+        };
+    }
+
     return (
         <div className="layout-v2-example__app" data-testid="vscode-workbench-overlay-example">
             <VSCodeWorkbench
@@ -34,6 +52,16 @@ export function VSCodeWorkbenchOverlayUsageExample(): ReactNode {
                 tabDragPreviewRenderMode="overlay"
                 preserveActiveTabContentDuringDrag
                 renderTabContentInDragPreviewLayout={false}
+                emitSnapshotsOnSectionResize={false}
+                onSectionRatioChange={() => {
+                    window.__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__!.sectionRatio += 1;
+                }}
+                onLayoutSnapshotChange={() => {
+                    window.__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__!.layoutSnapshot += 1;
+                }}
+                onPanelLayoutChange={() => {
+                    window.__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__!.panelLayout += 1;
+                }}
                 className="layout-v2-example__fullscreen-layout"
             />
         </div>

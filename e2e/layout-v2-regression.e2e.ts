@@ -223,6 +223,24 @@ async function readCommittedTabSections(page: Page): Promise<LayoutV2SectionSnap
     });
 }
 
+async function readOverlayExampleCallbackCounts(page: Page): Promise<{
+    sectionRatio: number;
+    layoutSnapshot: number;
+    panelLayout: number;
+}> {
+    return page.evaluate(() => (window as Window & {
+        __LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__?: {
+            sectionRatio: number;
+            layoutSnapshot: number;
+            panelLayout: number;
+        };
+    }).__LAYOUT_V2_OVERLAY_EXAMPLE_COUNTS__ ?? {
+        sectionRatio: 0,
+        layoutSnapshot: 0,
+        panelLayout: 0,
+    });
+}
+
 async function readOverlayTabSections(page: Page): Promise<LayoutV2SectionSnapshot[]> {
     return page.evaluate(() => {
         const overlayRoot = document.querySelector<HTMLElement>('[data-layout-tab-preview-overlay="true"] .layout-v2__root');
@@ -913,6 +931,35 @@ test.describe("layout-v2 regressions", () => {
         expect(leftThirdFrame.previewSectionIndex).toBe(0);
         expect(leftThirdFrame.leftSectionTitles).toEqual([TAB_REVIEW, TAB_METRICS]);
         expect(leftThirdFrame.rightSectionTitles).toBeNull();
+    });
+
+    test("section resize can skip full snapshot callbacks while keeping ratio callbacks", async ({ page }) => {
+        await gotoVSCodeWorkbenchOverlayExample(page);
+
+        await dragTabToSectionContentSide(page, TAB_WELCOME, "main-tabs", "right");
+        await expect.poll(async () => readCommittedTabSections(page)).toHaveLength(2);
+
+        const divider = page
+            .locator(".layout-v2__divider--horizontal:not(.layout-v2__divider--disabled)[aria-label='Resize sections']")
+            .first();
+        await divider.waitFor({ state: "visible" });
+        const box = await divider.boundingBox();
+        if (!box) {
+            throw new Error("resize callback divider bounds missing");
+        }
+
+        const before = await readOverlayExampleCallbackCounts(page);
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 72, box.y + box.height / 2, { steps: 8 });
+        await waitForAnimationFrames(page, 2);
+        await page.mouse.up();
+        await waitForAnimationFrames(page, 2);
+
+        const after = await readOverlayExampleCallbackCounts(page);
+        expect(after.sectionRatio).toBeGreaterThan(before.sectionRatio);
+        expect(after.layoutSnapshot).toBe(before.layoutSnapshot);
+        expect(after.panelLayout).toBe(before.panelLayout);
     });
 
     test("overlay preview should use the pre-destroy layout for right-side split hit testing", async ({ page }) => {

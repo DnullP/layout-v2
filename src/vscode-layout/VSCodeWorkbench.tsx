@@ -18,7 +18,7 @@ import {
 } from "react";
 import { findSectionNode, isSectionHidden, setSectionHidden, type SectionNode } from "../section/layoutModel";
 import { createSectionComponentBinding, createSectionComponentRegistry, getSectionComponentBinding, SectionComponentHost } from "../section/sectionComponent";
-import { SectionLayoutView } from "../section/SectionLayoutView";
+import { SectionLayoutView, type SectionResizeStrategy } from "../section/SectionLayoutView";
 import {
     arePreviewHoverTargetsEqual,
     isPointerInsidePreviewBounds,
@@ -426,6 +426,10 @@ export interface VSCodeWorkbenchProps {
     onSectionRatioChange?: (ratios: Record<string, number>) => void;
     /** panel split 布局变化回调（用于持久化）。 */
     onPanelLayoutChange?: (snapshot: WorkbenchPanelLayoutSnapshot) => void;
+    /** resize-section 是否触发完整 snapshot 回调。默认开启以保留兼容行为。 */
+    emitSnapshotsOnSectionResize?: boolean;
+    /** section 拖拽 resize 的热路径策略。state 每帧提交 store；dom-flex 每帧只更新相邻 DOM slot，松手后提交 store。 */
+    sectionResizeStrategy?: SectionResizeStrategy;
     /** 工作区主布局变化回调（用于持久化）。 */
     onLayoutSnapshotChange?: (snapshot: WorkbenchLayoutSnapshot) => void;
 
@@ -779,6 +783,8 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onActivityBarBackgroundContextMenu,
         onSectionRatioChange,
         onPanelLayoutChange,
+        emitSnapshotsOnSectionResize = true,
+        sectionResizeStrategy = "state",
         onLayoutSnapshotChange,
         apiRef,
         className,
@@ -1055,6 +1061,10 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                 return;
             }
 
+            if (!emitSnapshotsOnSectionResize && event.command === "resize-section") {
+                return;
+            }
+
             if (
                 event.state.root === event.nextState.root &&
                 event.state.tabSections === event.nextState.tabSections &&
@@ -1065,13 +1075,17 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
             onLayoutSnapshotChangeRef.current?.(exportWorkbenchLayoutSnapshot(event.nextState));
         });
-    }, [store]);
+    }, [emitSnapshotsOnSectionResize, store]);
 
     const onPanelLayoutChangeRef = useRef(onPanelLayoutChange);
     onPanelLayoutChangeRef.current = onPanelLayoutChange;
     useEffect(() => {
         return store.addLifecycleHook((event) => {
             if (event.phase !== "after" || !event.changed) {
+                return;
+            }
+
+            if (!emitSnapshotsOnSectionResize && event.command === "resize-section") {
                 return;
             }
 
@@ -1084,7 +1098,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
             onPanelLayoutChangeRef.current?.(exportWorkbenchPanelLayoutSnapshot(event.nextState));
         });
-    }, [store]);
+    }, [emitSnapshotsOnSectionResize, store]);
 
     // --- Tab operations ---
     const openTab = useCallback((tab: WorkbenchTabDefinition): void => {
@@ -2213,6 +2227,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                     <SectionComponentHost section={section} registry={registry} />
                 )}
                 onResizeSection={(sectionId, ratio) => store.resizeSection(sectionId, ratio)}
+                resizeStrategy={sectionResizeStrategy}
             />
             {shouldRenderTabPreviewOverlay && tabPreview ? (
                 <div

@@ -28,14 +28,18 @@ export interface SectionLayoutViewProps<T> {
     animationRoot?: SectionNode<T>;
     renderSection: (section: SectionNode<T>) => ReactNode;
     onResizeSection: (sectionId: string, ratio: number) => void;
+    resizeStrategy?: SectionResizeStrategy;
     minSectionSize?: number;
     className?: string;
 }
+
+export type SectionResizeStrategy = "state" | "dom-flex";
 
 interface SectionNodeViewProps<T> {
     node: SectionNode<T>;
     renderSection: (section: SectionNode<T>) => ReactNode;
     onResizeSection: (sectionId: string, ratio: number) => void;
+    resizeStrategy: SectionResizeStrategy;
     minSectionSize: number;
     splitAnimations: Record<string, SplitAnimationDescriptor>;
     onSplitAnimationComplete: (sectionId: string, token: number) => void;
@@ -62,6 +66,7 @@ interface SplitDividerProps {
     ratio: number;
     minSectionSize: number;
     onResize: (ratio: number) => void;
+    resizeStrategy: SectionResizeStrategy;
     disabled?: boolean;
 }
 
@@ -82,6 +87,34 @@ function buildChildStyle(ratio: number, isPrimary: boolean): CSSProperties {
     return {
         flex: isPrimary ? ratio : 1 - ratio,
     };
+}
+
+function resolveDomFlexResizeSlots(
+    divider: HTMLElement | null,
+): { firstSlot: HTMLElement; secondSlot: HTMLElement } | null {
+    const container = divider?.parentElement;
+    if (!container) {
+        return null;
+    }
+
+    const childSlots = Array.from(container.children).filter((child): child is HTMLElement => (
+        child instanceof HTMLElement && child.classList.contains("layout-v2__child-slot")
+    ));
+
+    const [firstSlot, secondSlot] = childSlots;
+    if (!firstSlot || !secondSlot || childSlots.length !== 2) {
+        return null;
+    }
+
+    return { firstSlot, secondSlot };
+}
+
+function applyDomFlexResizeRatio(
+    slots: { firstSlot: HTMLElement; secondSlot: HTMLElement },
+    ratio: number,
+): void {
+    slots.firstSlot.style.flex = `${ratio} 1 0%`;
+    slots.secondSlot.style.flex = `${1 - ratio} 1 0%`;
 }
 
 function findSectionNodeById<T>(
@@ -193,7 +226,7 @@ function collectSplitAnimations<T>(
 }
 
 function SplitDivider(props: SplitDividerProps): ReactNode {
-    const { direction, ratio, minSectionSize, onResize, disabled = false } = props;
+    const { direction, ratio, minSectionSize, onResize, resizeStrategy, disabled = false } = props;
     const dividerRef = useRef<HTMLDivElement | null>(null);
     const [isDragging, setIsDragging] = useState(false);
 
@@ -220,12 +253,23 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
         const totalSize = direction === "horizontal" ? startRect.width : startRect.height;
         const startPointer = direction === "horizontal" ? event.clientX : event.clientY;
         const startRatio = ratio;
+        const domFlexResizeSlots = resizeStrategy === "dom-flex"
+            ? resolveDomFlexResizeSlots(dividerRef.current)
+            : null;
 
         setIsDragging(true);
         document.documentElement.setAttribute("data-layout-resizing", "true");
 
         let rafId: number | null = null;
         let lastPointer = startPointer;
+        const applyResize = (nextRatio: number): void => {
+            if (domFlexResizeSlots) {
+                applyDomFlexResizeRatio(domFlexResizeSlots, nextRatio);
+                return;
+            }
+
+            onResize(nextRatio);
+        };
 
         const handlePointerMove = (moveEvent: PointerEvent): void => {
             lastPointer = direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
@@ -240,7 +284,7 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
                     totalSize,
                     minSectionSize,
                 );
-                onResize(nextRatio);
+                applyResize(nextRatio);
             });
         };
 
@@ -256,6 +300,9 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
                 totalSize,
                 minSectionSize,
             );
+            if (domFlexResizeSlots) {
+                applyDomFlexResizeRatio(domFlexResizeSlots, finalRatio);
+            }
             onResize(finalRatio);
 
             setIsDragging(false);
@@ -301,6 +348,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
         node,
         renderSection,
         onResizeSection,
+        resizeStrategy,
         minSectionSize,
         splitAnimations,
         onSplitAnimationComplete,
@@ -402,6 +450,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                 node={secondChild}
                 renderSection={renderSection}
                 onResizeSection={onResizeSection}
+                resizeStrategy={resizeStrategy}
                 minSectionSize={minSectionSize}
                 splitAnimations={splitAnimations}
                 onSplitAnimationComplete={onSplitAnimationComplete}
@@ -415,6 +464,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                 node={firstChild}
                 renderSection={renderSection}
                 onResizeSection={onResizeSection}
+                resizeStrategy={resizeStrategy}
                 minSectionSize={minSectionSize}
                 splitAnimations={splitAnimations}
                 onSplitAnimationComplete={onSplitAnimationComplete}
@@ -430,6 +480,8 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
     ].join(" ");
     const firstTargetRatio = node.split.ratio;
     const secondTargetRatio = 1 - node.split.ratio;
+    const firstFixedSize = firstChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
+    const secondFixedSize = secondChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
 
     // Compute child styles — hide animation overrides split animation and normal flex.
     let firstChildStyle: CSSProperties;
@@ -488,9 +540,6 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                 : (isSplitAnimationEntered ? `${secondTargetRatio * 100}%` : "100%"),
         };
     } else {
-        const firstFixedSize = firstChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
-        const secondFixedSize = secondChild.meta?.[SECTION_FIXED_SIZE_META_KEY] as number | undefined;
-
         firstChildStyle = firstFixedSize != null
             ? { flex: `0 0 ${firstFixedSize}px` }
             : secondFixedSize != null
@@ -502,6 +551,11 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                 ? { flex: "1 1 0%" }
                 : buildChildStyle(node.split.ratio, false);
     }
+
+    const hasFixedSizeChild = firstFixedSize != null || secondFixedSize != null;
+    const dividerResizeStrategy = hasFixedSizeChild || isAnimating || Boolean(splitAnimation)
+        ? "state"
+        : resizeStrategy;
 
     return (
         <div className={branchClassName} data-section-id={node.id}>
@@ -528,6 +582,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                         node={firstChild}
                         renderSection={renderSection}
                         onResizeSection={onResizeSection}
+                        resizeStrategy={resizeStrategy}
                         minSectionSize={minSectionSize}
                         splitAnimations={splitAnimations}
                         onSplitAnimationComplete={onSplitAnimationComplete}
@@ -539,6 +594,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                 ratio={node.split.ratio}
                 minSectionSize={minSectionSize}
                 disabled={!canResizeSectionSplit(node)}
+                resizeStrategy={dividerResizeStrategy}
                 onResize={(nextRatio) => onResizeSection(node.id, nextRatio)}
             />
             <div
@@ -564,6 +620,7 @@ function SectionNodeView<T>(props: SectionNodeViewProps<T>): ReactNode {
                         node={secondChild}
                         renderSection={renderSection}
                         onResizeSection={onResizeSection}
+                        resizeStrategy={resizeStrategy}
                         minSectionSize={minSectionSize}
                         splitAnimations={splitAnimations}
                         onSplitAnimationComplete={onSplitAnimationComplete}
@@ -580,6 +637,7 @@ export function SectionLayoutView<T>(props: SectionLayoutViewProps<T>): ReactNod
         animationRoot,
         renderSection,
         onResizeSection,
+        resizeStrategy = "state",
         minSectionSize = 120,
         className,
     } = props;
@@ -629,11 +687,16 @@ export function SectionLayoutView<T>(props: SectionLayoutViewProps<T>): ReactNod
     }, []);
 
     return (
-        <div className={rootClassName} data-layout-root-id={root.id}>
+        <div
+            className={rootClassName}
+            data-layout-root-id={root.id}
+            data-layout-resize-strategy={resizeStrategy}
+        >
             <SectionNodeView
                 node={root}
                 renderSection={renderSection}
                 onResizeSection={onResizeSection}
+                resizeStrategy={resizeStrategy}
                 minSectionSize={minSectionSize}
                 splitAnimations={splitAnimations}
                 onSplitAnimationComplete={handleSplitAnimationComplete}
