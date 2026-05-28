@@ -31,6 +31,8 @@ interface LayoutV2SectionSnapshot {
 interface PanelSectionFrameSnapshot {
     paneCount: number;
     paneTitle: string | null;
+    activePaneCount: number;
+    activePaneTitle: string | null;
     placeholders: number;
     barIsDragOver: boolean;
     contentIsDragOver: boolean;
@@ -332,6 +334,8 @@ async function readPanelSectionFrameSnapshot(
         return {
             paneCount: host.querySelectorAll(".layout-v2-panel-section__pane").length,
             paneTitle: host.querySelector<HTMLElement>(".layout-v2-panel-section__pane-title")?.textContent ?? null,
+            activePaneCount: host.querySelectorAll('.layout-v2-panel-section__pane[data-layout-presentation-state="committed"]').length,
+            activePaneTitle: host.querySelector<HTMLElement>('.layout-v2-panel-section__pane[data-layout-presentation-state="committed"] .layout-v2-panel-section__pane-title')?.textContent ?? null,
             placeholders: host.querySelectorAll(".layout-v2-panel-section__panel-placeholder").length,
             barIsDragOver: host.querySelector(".layout-v2-panel-section__bar")?.classList.contains("layout-v2-panel-section__bar--drag-over") ?? false,
             contentIsDragOver: host.querySelector(".layout-v2-panel-section__content")?.classList.contains("layout-v2-panel-section__content--drag-over") ?? false,
@@ -434,12 +438,16 @@ async function readTabSlotTransforms(page: Page, tabSectionId: string): Promise<
     }, tabSectionId);
 }
 
+function activePanelPaneTitle(sectionSelector: string): string {
+    return `${sectionSelector} .layout-v2-panel-section__pane[data-layout-presentation-state="committed"] .layout-v2-panel-section__pane-title`;
+}
+
 test.describe("layout-v2 regressions", () => {
     test("example layout should include the right sidebar panel section", async ({ page }) => {
         await gotoLayoutV2Example(page);
 
         await expect(page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"]')).toBeVisible();
-        await expect(page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__pane-title')).toHaveText('Outline');
+        await expect(page.locator(activePanelPaneTitle('.layout-v2-panel-section[data-panel-section-id="right-panel"]'))).toHaveText('Outline');
     });
 
     test("action-mode activity icons should not change selected focus on click", async ({ page }) => {
@@ -453,8 +461,8 @@ test.describe("layout-v2 regressions", () => {
     test("panel bars should support both action-only and focus-changing clicks", async ({ page }) => {
         await gotoLayoutV2Example(page);
 
-        const leftPaneTitle = page.locator('.layout-v2-panel-section[data-panel-section-id="left-panel"] .layout-v2-panel-section__pane-title');
-        const rightPaneTitle = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"] .layout-v2-panel-section__pane-title');
+        const leftPaneTitle = page.locator(activePanelPaneTitle('.layout-v2-panel-section[data-panel-section-id="left-panel"]'));
+        const rightPaneTitle = page.locator(activePanelPaneTitle('.layout-v2-panel-section[data-panel-section-id="right-panel"]'));
 
         await page.locator('.layout-v2-panel-section[data-panel-section-id="left-panel"] .layout-v2-panel-section__panel-tab[aria-label="Search"]').click();
         await expect(leftPaneTitle).toHaveText('Explorer');
@@ -609,27 +617,27 @@ test.describe("layout-v2 regressions", () => {
         await page.mouse.up();
         await waitForAnimationFrames(page, 2);
 
-        expect(afterDown.paneCount).toBe(1);
+        expect(afterDown.activePaneCount).toBe(1);
         expect(afterDown.barIsDragOver).toBe(false);
         expect(afterDown.contentIsDragOver).toBe(false);
 
         expect(barFrame.barIsDragOver).toBe(true);
         expect(barFrame.contentIsDragOver).toBe(false);
         expect(barFrame.placeholders).toBe(1);
-        expect(barFrame.paneCount).toBe(1);
-        expect(barFrame.paneTitle).toBe("Outline");
+        expect(barFrame.activePaneCount).toBe(1);
+        expect(barFrame.activePaneTitle).toBe("Outline");
 
         expect(topFrame.barIsDragOver).toBe(false);
         expect(topFrame.contentIsDragOver).toBe(true);
         expect(topFrame.placeholders).toBe(0);
-        expect(topFrame.paneCount).toBe(1);
-        expect(topFrame.paneTitle).toBe("Problems");
+        expect(topFrame.activePaneCount).toBe(1);
+        expect(topFrame.activePaneTitle).toBe("Problems");
 
         expect(leaveTopFrame.barIsDragOver).toBe(false);
         expect(leaveTopFrame.contentIsDragOver).toBe(false);
         expect(leaveTopFrame.placeholders).toBe(1);
-        expect(leaveTopFrame.paneCount).toBe(1);
-        expect(leaveTopFrame.paneTitle).toBe("Outline");
+        expect(leaveTopFrame.activePaneCount).toBe(1);
+        expect(leaveTopFrame.activePaneTitle).toBe("Outline");
     });
 
     test("panel drag should commit the visible split when released inside the retained top-edge preview band", async ({ page }) => {
@@ -672,10 +680,10 @@ test.describe("layout-v2 regressions", () => {
         });
 
         expect(enterTopFrame.contentIsDragOver).toBe(true);
-        expect(enterTopFrame.paneTitle).toBe("Problems");
+        expect(enterTopFrame.activePaneTitle).toBe("Problems");
 
         expect(retainedTopFrame.contentIsDragOver).toBe(true);
-        expect(retainedTopFrame.paneTitle).toBe("Problems");
+        expect(retainedTopFrame.activePaneTitle).toBe("Problems");
 
         expect(committedPanelTitles).toHaveLength(3);
         expect(committedPanelTitles).toContain("Explorer");
@@ -721,7 +729,7 @@ test.describe("layout-v2 regressions", () => {
         }
 
         await expect(content).not.toHaveClass(/layout-v2-panel-section__content--collapsed/);
-        await expect(rightPanel.locator('.layout-v2-panel-section__pane-title')).toHaveText('Problems');
+        await expect(rightPanel.locator('.layout-v2-panel-section__pane[data-layout-presentation-state="committed"] .layout-v2-panel-section__pane-title')).toHaveText('Problems');
         expect(Math.abs(reexpandedPanelBox.width - collapsedPanelBox.width)).toBeLessThan(2);
     });
 

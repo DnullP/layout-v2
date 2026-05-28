@@ -223,6 +223,7 @@ export function PanelSection(props: {
     const previousSlotLeftsRef = useRef<Record<string, number>>({});
     const previousPanelsRef = useRef(panelSection?.panels);
     const hoverTargetClearFrameRef = useRef<number>(0);
+    const activityTargetClearFrameRef = useRef<number>(0);
     const rawDragSession = controlledDragSession ?? internalDragSession;
     const dragSession = rawDragSession && !isEndedPanelSectionDragSession(rawDragSession)
         ? rawDragSession
@@ -265,9 +266,7 @@ export function PanelSection(props: {
     const pendingPanelId = activePanel && !isActivePanelReadyForPresentation
         ? activePanel.id
         : null;
-    const renderedContentPanels = panelSection.panels.filter((panel) => (
-        panel.id === visiblePanelId || panel.id === pendingPanelId
-    ));
+    const renderedContentPanels = panelSection.panels;
     const hasPanels = panelSection.panels.length > 0;
     const shouldRenderBar = hasPanels || !hideBarWhenEmpty;
     const draggingPanelId = dragSession?.phase === "dragging" && dragSession.currentPanelSectionId === panelSection.id
@@ -530,39 +529,41 @@ export function PanelSection(props: {
     ]);
 
     useEffect(() => {
-        if ((!interactive && !allowContentPreview) || !activityDragSession || activityDragSession.phase !== "dragging") {
+        if (!interactive || !activityDragSession || activityDragSession.phase !== "dragging") {
+            if (activityTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(activityTargetClearFrameRef.current);
+                activityTargetClearFrameRef.current = 0;
+            }
             return;
         }
 
         const barRect = barRef.current?.getBoundingClientRect() ?? null;
-        const contentRect = contentRef.current?.getBoundingClientRect() ?? null;
-        const isCurrentSectionContentTarget = Boolean(
-            activityDragSession.contentTarget?.area === "content" &&
-            activityDragSession.contentTarget.panelSectionId === panelSection.id,
+        const isCurrentSectionBarTarget = Boolean(
+            activityDragSession.panelTarget?.panelSectionId === panelSection.id,
         );
-        const { contentBounds, shouldPreferStableContentTarget } = resolvePreviewContentSession({
-            currentTarget: activityDragSession.contentTarget,
-            isCurrentSectionContentTarget,
-            contentRect,
-            pointerX: activityDragSession.pointerX,
-            pointerY: activityDragSession.pointerY,
-        });
-        const insideBar = Boolean(
-            interactive &&
-            !shouldPreferStableContentTarget &&
+        const shouldPreferStableBarTarget = Boolean(
+            isCurrentSectionBarTarget &&
             barRect &&
             activityDragSession.pointerX >= barRect.left &&
             activityDragSession.pointerX <= barRect.right &&
             activityDragSession.pointerY >= barRect.top &&
-            activityDragSession.pointerY <= barRect.bottom,
+            activityDragSession.pointerY <= barRect.bottom + PANEL_BAR_CONTENT_BOUNDARY_HYSTERESIS_PX,
         );
-        const insideContent = !panelSection.isCollapsed && isPointerInsidePreviewBounds(
-            contentBounds,
-            activityDragSession.pointerX,
-            activityDragSession.pointerY,
+        const insideBar = Boolean(
+            (shouldPreferStableBarTarget || (
+                barRect &&
+                activityDragSession.pointerX >= barRect.left &&
+                activityDragSession.pointerX <= barRect.right &&
+                activityDragSession.pointerY >= barRect.top &&
+                activityDragSession.pointerY <= barRect.bottom
+            )),
         );
 
         if (insideBar) {
+            if (activityTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(activityTargetClearFrameRef.current);
+                activityTargetClearFrameRef.current = 0;
+            }
             const targetIndex = getPanelTargetIndexFromPointer(
                 activityDragSession.pointerX,
                 slotRefs.current,
@@ -588,54 +589,29 @@ export function PanelSection(props: {
             return;
         }
 
-        if (insideContent && contentBounds) {
-            const nextTarget: PanelSectionHoverTarget = {
-                area: "content",
-                leafSectionId,
-                anchorLeafSectionId: resolvePreviewAnchorLeafSectionId({
-                    currentTarget: activityDragSession.contentTarget,
-                    isCurrentSectionContentTarget,
-                    committedLeafSectionId,
-                }),
-                panelSectionId: panelSection.id,
-                splitSide: resolvePreviewSplitSide(
-                    contentBounds,
-                    activityDragSession.pointerX,
-                    activityDragSession.pointerY,
-                    {
-                        top: "top",
-                        bottom: "bottom",
-                    } as const,
-                    {
-                        currentSplitSide: isCurrentSectionContentTarget
-                            ? activityDragSession.contentTarget?.splitSide ?? null
-                            : null,
-                    },
-                ),
-                contentBounds,
-            };
-
-            if (!arePreviewHoverTargetsEqual(activityDragSession.contentTarget, nextTarget, getPanelSectionHoverTargetId)) {
-                updateActivityDragSession({
-                    ...activityDragSession,
-                    panelTarget: null,
-                    contentTarget: nextTarget,
-                });
-            }
-            return;
-        }
-
         const needsClearPanelTarget = activityDragSession.panelTarget?.panelSectionId === panelSection.id;
         const needsClearContentTarget = activityDragSession.contentTarget?.leafSectionId === leafSectionId;
 
         if (needsClearPanelTarget || needsClearContentTarget) {
-            updateActivityDragSession({
-                ...activityDragSession,
-                panelTarget: needsClearPanelTarget ? null : activityDragSession.panelTarget,
-                contentTarget: needsClearContentTarget ? null : activityDragSession.contentTarget,
-            });
+            if (!activityTargetClearFrameRef.current) {
+                activityTargetClearFrameRef.current = window.requestAnimationFrame(() => {
+                    activityTargetClearFrameRef.current = 0;
+                    updateActivityDragSession({
+                        ...activityDragSession,
+                        panelTarget: needsClearPanelTarget ? null : activityDragSession.panelTarget,
+                        contentTarget: needsClearContentTarget ? null : activityDragSession.contentTarget,
+                    });
+                });
+            }
         }
-    }, [activityDragSession, allowContentPreview, committedLeafSectionId, interactive, leafSectionId, panelSection.id, panelSection.isCollapsed, panelSection.panels, updateActivityDragSession]);
+
+        return () => {
+            if (activityTargetClearFrameRef.current) {
+                window.cancelAnimationFrame(activityTargetClearFrameRef.current);
+                activityTargetClearFrameRef.current = 0;
+            }
+        };
+    }, [activityDragSession, interactive, leafSectionId, panelSection.id, panelSection.panels, updateActivityDragSession]);
 
     const pointerInsideBar = Boolean(
         interactive &&

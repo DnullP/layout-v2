@@ -389,7 +389,7 @@ export function TabSection(props: {
   const isActiveCardReadyForPresentation = activeCard
     ? isTabReadyForPresentation(activeCard)
     : false;
-  const draggingTabId = renderDraggedTabPlaceholder && dragSession?.currentTabSectionId === tabSection.id
+  const draggingTabId = renderDraggedTabPlaceholder && dragSession?.phase === "dragging" && dragSession.currentTabSectionId === tabSection.id
     ? dragSession.tabId
     : null;
   const isDraggingLoneSourceTab = Boolean(

@@ -232,6 +232,55 @@ describe("render adapters", () => {
         expect(tabMarkup).not.toContain("layout-v2-tab-section__empty-card");
     });
 
+    test("pending tab press should keep the source tab visible until drag starts", () => {
+        const tabMarkup = renderToStaticMarkup(
+            <TabSection
+                leafSectionId="main"
+                committedLeafSectionId="main"
+                tabSectionId="main-tabs"
+                tabSection={{
+                    id: "main-tabs",
+                    tabs: [
+                        { id: "welcome", title: "Welcome", content: "Welcome page" },
+                        { id: "guide", title: "Guide", content: "Guide page" },
+                    ],
+                    focusedTabId: "guide",
+                }}
+                dragSession={{
+                    sourceTabSectionId: "main-tabs",
+                    currentTabSectionId: "main-tabs",
+                    sourceLeafSectionId: "main",
+                    currentLeafSectionId: "main",
+                    tabId: "guide",
+                    title: "Guide",
+                    content: "Guide page",
+                    pointerId: 1,
+                    originX: 100,
+                    originY: 100,
+                    pointerX: 102,
+                    pointerY: 101,
+                    phase: "pending",
+                    hoverTarget: {
+                        area: "strip",
+                        leafSectionId: "main",
+                        anchorLeafSectionId: "main",
+                        tabSectionId: "main-tabs",
+                        targetIndex: 1,
+                    },
+                }}
+                renderTabTitle={(tab) => <span data-host-tab-title={tab.id}>{tab.title}</span>}
+                renderTabContent={(tab) => <div data-host-tab-content={tab.id}>{tab.content}</div>}
+                onFocusTab={() => { }}
+                onCloseTab={() => { }}
+                onMoveTab={() => { }}
+            />,
+        );
+
+        expect(tabMarkup).toContain('data-host-tab-title="guide"');
+        expect(tabMarkup).toContain("Guide");
+        expect(tabMarkup).not.toContain("layout-v2-tab-section__tab-placeholder");
+    });
+
     test("应支持在空 panel section 时隐藏 panel bar", () => {
         const panelMarkup = renderToStaticMarkup(
             <PanelSection
@@ -305,6 +354,36 @@ describe("render adapters", () => {
 
         expect(panelMarkup).toContain('data-host-panel-content="ai-chat"');
         expect(panelMarkup).toContain("AI content");
+    });
+
+    test("切换 focusedPanelId 时应继续保留非激活 panel 的内容节点", () => {
+        const panelMarkup = renderToStaticMarkup(
+            <PanelSection
+                leafSectionId="right-sidebar"
+                committedLeafSectionId="right-sidebar"
+                panelSectionId="right-panel"
+                panelSection={{
+                    id: "right-panel",
+                    panels: [
+                        { id: "ai-chat", label: "AI Chat", symbol: "A", content: "AI content" },
+                        { id: "outline", label: "Outline", symbol: "O", content: "Outline content" },
+                    ],
+                    focusedPanelId: "outline",
+                    isCollapsed: false,
+                }}
+                renderPanelContent={(panel) => <div data-host-panel-content={panel.id}>{panel.content}</div>}
+                onFocusPanel={() => { }}
+                onToggleCollapsed={() => { }}
+                onMovePanel={() => { }}
+            />,
+        );
+
+        expect(panelMarkup).toContain('data-host-panel-content="ai-chat"');
+        expect(panelMarkup).toContain('data-host-panel-content="outline"');
+        expect(panelMarkup).toContain('data-layout-presentation-state="inactive"');
+        expect(panelMarkup).toContain('data-layout-presentation-state="committed"');
+        expect(panelMarkup).toContain("layout-v2-panel-section__pane--inactive");
+        expect(panelMarkup).toContain("layout-v2-panel-section__pane--active");
     });
 
     test("等待提交的 focused panel 应先隐藏挂载内容并标记 pending", () => {

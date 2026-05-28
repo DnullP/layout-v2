@@ -254,6 +254,69 @@ describe("tabWorkbench helpers", () => {
     expect(previewSection?.tabs.map((tab) => tab.id)).toEqual(["review"]);
   });
 
+  test("单 tab root source 拖到自身 content split 时 preview section 不应空白", () => {
+    const root = createRootSection<TestBindingData>(
+      createDraft(
+        "root",
+        "Root",
+        "root",
+        createSectionComponentBinding("tab-section", {
+          tabSectionId: "main-tabs",
+        }),
+      ),
+    );
+
+    const state = createTabSectionsState([
+      {
+        id: "main-tabs",
+        tabs: [{ id: "large-table", title: "Large Table", content: "Large table editor" }],
+        focusedTabId: "large-table",
+        isRoot: true,
+      },
+    ]);
+
+    const session: TabSectionDragSession = {
+      sourceTabSectionId: "main-tabs",
+      currentTabSectionId: "main-tabs",
+      sourceLeafSectionId: "root",
+      currentLeafSectionId: "root",
+      tabId: "large-table",
+      title: "Large Table",
+      content: "Large table editor",
+      pointerId: 1,
+      originX: 10,
+      originY: 10,
+      pointerX: 760,
+      pointerY: 180,
+      phase: "dragging",
+      hoverTarget: {
+        area: "content",
+        leafSectionId: "root",
+        anchorLeafSectionId: "root",
+        tabSectionId: "main-tabs",
+        splitSide: "right",
+        contentBounds: {
+          left: 100,
+          top: 0,
+          right: 800,
+          bottom: 400,
+          width: 700,
+          height: 400,
+        },
+      },
+    };
+
+    const preview = buildTabWorkbenchPreviewState(root, state, session, adapter);
+
+    expect(preview).not.toBeNull();
+    const sections = Object.values(preview!.state.sections);
+    expect(sections.every((section) => section.tabs.length > 0)).toBe(true);
+    const previewSection = sections.find((section) => section.id.startsWith("preview-tab-section"));
+    expect(previewSection?.tabs.map((tab) => tab.id)).toEqual(["large-table"]);
+    expect(preview?.state.sections["main-tabs"]).toBeUndefined();
+    expect(findSectionNode(preview!.root, "root")).not.toBeNull();
+  });
+
   test("preview split 应在 source lone tab 预折叠后重定位 source hover 到 survivor section", () => {
     let root = createRootSection<TestBindingData>(
       createDraft("root", "Root", "root", createSectionComponentBinding("empty", {})),

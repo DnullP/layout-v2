@@ -167,6 +167,35 @@ async function createLeftSideSplit(page: Page, tabTitle: string = TAB_WELCOME): 
 }
 
 test.describe("tab workbench lifecycle", () => {
+    test("light tab press should keep the tab visible before drag threshold", async ({ page }) => {
+        await gotoLayoutV2Example(page);
+
+        const reviewTab = page.locator(".layout-v2-tab-section__tab-main", { hasText: TAB_REVIEW }).first();
+        const reviewTabBounds = await reviewTab.boundingBox();
+        if (!reviewTabBounds) {
+            throw new Error("light tab press source bounds missing");
+        }
+
+        await page.mouse.move(
+            reviewTabBounds.x + reviewTabBounds.width / 2,
+            reviewTabBounds.y + reviewTabBounds.height / 2,
+        );
+        await page.mouse.down();
+        await waitForNextAnimationFrame(page);
+
+        await expect(page.locator(".layout-v2-tab-section__tab-placeholder")).toHaveCount(0);
+        await expect(page.locator(".layout-v2-tab-section__tab-title", { hasText: TAB_REVIEW })).toBeVisible();
+        expect(await readTabSections(page)).toEqual([
+            expect.objectContaining({
+                id: "main-tabs",
+                titles: [TAB_WELCOME, TAB_REVIEW, TAB_METRICS],
+            }),
+        ]);
+
+        await page.mouse.up();
+        await expect(reviewTab).toBeVisible();
+    });
+
     test("preview split should render a preview tab section before drop", async ({ page }) => {
         await gotoLayoutV2Example(page);
 

@@ -62,6 +62,16 @@ declare global {
                 params?: Record<string, unknown>;
             }) => void;
             activatePanel: (panelId: string) => void;
+            previewDraggedTab: (
+                payload: {
+                    id: string;
+                    title: string;
+                    component: string;
+                    params?: Record<string, unknown>;
+                    sourceWindowLabel?: string | null;
+                },
+                pointer: { clientX?: number; clientY?: number; screenX?: number; screenY?: number },
+            ) => boolean;
         } | null;
     }
 }
@@ -184,7 +194,7 @@ async function readPanelSections(page: Page): Promise<PanelSnapshot[]> {
                 focusedPanelId: node.querySelector<HTMLElement>("[data-layout-role='panel-content']")?.getAttribute("data-layout-panel-id") ?? null,
                 titles: Array.from(node.querySelectorAll<HTMLElement>(".layout-v2-panel-section__panel-tab"))
                     .map((tab) => tab.getAttribute("aria-label") ?? ""),
-                paneTitle: node.querySelector<HTMLElement>(".layout-v2-panel-section__pane-title")?.textContent ?? null,
+                paneTitle: node.querySelector<HTMLElement>('.layout-v2-panel-section__pane[data-layout-presentation-state="committed"] .layout-v2-panel-section__pane-title')?.textContent ?? null,
                 rect: {
                     left: rect.left,
                     top: rect.top,
@@ -196,6 +206,10 @@ async function readPanelSections(page: Page): Promise<PanelSnapshot[]> {
             };
         });
     });
+}
+
+function activePanelPaneTitle(sectionSelector: string): string {
+    return `${sectionSelector} .layout-v2-panel-section__pane[data-layout-presentation-state="committed"] .layout-v2-panel-section__pane-title`;
 }
 
 async function readActivityOrder(page: Page): Promise<string[]> {
@@ -270,8 +284,8 @@ test.describe("ofive workbench layout fixture", () => {
         await expect(page.locator('[data-testid="activity-bar-item-files"]')).toBeVisible();
         await expect(page.locator('[data-testid="activity-bar-item-search"]')).toBeVisible();
         await expect(page.locator('[data-testid="activity-bar-item-__settings__"]')).toBeVisible();
-        await expect(page.locator('[data-testid="sidebar-left"] .layout-v2-panel-section__pane-title')).toHaveText("Explorer");
-        await expect(page.locator('[data-testid="sidebar-right"] .layout-v2-panel-section__pane-title')).toHaveText("Outline");
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-left"]'))).toHaveText("Explorer");
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-right"]'))).toHaveText("Outline");
 
         const sections = await readTabSections(page);
         expect(sections).toHaveLength(1);
@@ -288,7 +302,7 @@ test.describe("ofive workbench layout fixture", () => {
 
     test("switches panel-container activities and callback activities open tabs", async ({ page }) => {
         await page.locator('[data-testid="activity-bar-item-search"]').click();
-        await expect(page.locator('[data-testid="sidebar-left"] .layout-v2-panel-section__pane-title')).toHaveText("Search");
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-left"]'))).toHaveText("Search");
         await expect(page.locator('[data-testid="sidebar-left"] .layout-v2-panel-section__panel-tab')).toHaveCount(1);
 
         await page.locator('[data-testid="activity-bar-item-calendar"]').click();
@@ -439,10 +453,43 @@ test.describe("ofive workbench layout fixture", () => {
             "test-message",
             "__settings__",
         ]);
-        await expect(page.locator('[data-testid="sidebar-left"] .layout-v2-panel-section__pane-title')).toHaveText("Search");
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-left"]'))).toHaveText("Search");
 
         const counts = await readCounts(page);
         expect(counts.activityBars).toBeGreaterThan(0);
+    });
+
+    test("holding an activity icon over right sidebar content should not trigger split preview", async ({ page }) => {
+        const source = page.locator('[data-testid="activity-bar-item-calendar"]');
+        const rightContent = page.locator(`[data-testid="sidebar-right"][data-panel-section-id="${RIGHT_PANEL_SECTION_ID}"] .layout-v2-panel-section__content`);
+        const targetBounds = await rightContent.boundingBox();
+        if (!targetBounds) {
+            throw new Error("ofive activity sidebar content target bounds missing");
+        }
+
+        const before = await readCounts(page);
+        const initialPanelSections = await readPanelSections(page);
+
+        await movePointerWithoutDrop(
+            page,
+            source,
+            targetBounds.x + targetBounds.width / 2,
+            targetBounds.y + 14,
+        );
+
+        await expect(page.locator(".layout-v2-panel-section")).toHaveCount(initialPanelSections.length);
+        await expect(page.locator('[data-layout-panel-preview-overlay="true"]')).toHaveCount(0);
+        await expect(rightContent).not.toHaveClass(/layout-v2-panel-section__content--drag-over/);
+        await page.waitForTimeout(SPLIT_ANIMATION_WAIT_MS);
+        await expect(page.locator(".layout-v2-panel-section")).toHaveCount(initialPanelSections.length);
+
+        await page.mouse.up();
+        await page.waitForTimeout(SPLIT_ANIMATION_WAIT_MS);
+
+        const counts = await readCounts(page);
+        expect(counts.activityDrop).toBe(before.activityDrop);
+        expect(counts.panelLayout).toBe(before.panelLayout);
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-right"]'))).toHaveText("Outline");
     });
 
     test("opens an external ofive file drag as a split editor tab", async ({ page }) => {
@@ -465,6 +512,100 @@ test.describe("ofive workbench layout fixture", () => {
         await expect(page.locator('[data-testid="ofive-tab-file:notes/external-drag.md"]')).toBeVisible();
     });
 
+    test("external tab drag from another window previews using target-window screen coordinates", async ({ page }) => {
+        const targetContent = page.locator(`.layout-v2-tab-section[data-tab-section-id="${MAIN_TAB_SECTION_ID}"] .layout-v2-tab-section__content`).first();
+        const targetBounds = await targetContent.boundingBox();
+        if (!targetBounds) {
+            throw new Error("ofive external cross-window drag target bounds missing");
+        }
+
+        await page.evaluate(() => {
+            Object.defineProperty(window, "screenX", { configurable: true, value: 500 });
+            Object.defineProperty(window, "screenY", { configurable: true, value: 240 });
+            Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+            Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+        });
+
+        const didPreview = await page.evaluate(({ screenX, screenY }) => (
+            window.__LAYOUT_V2_OFIVE_API__?.previewDraggedTab({
+                id: "external-note",
+                title: "External Note",
+                component: "codemirror",
+                params: { path: "notes/external-note.md" },
+                sourceWindowLabel: "source-window",
+            }, {
+                clientX: 1,
+                clientY: 1,
+                screenX,
+                screenY,
+            }) ?? false
+        ), {
+            screenX: 500 + targetBounds.x + targetBounds.width - 14,
+            screenY: 240 + targetBounds.y + targetBounds.height / 2,
+        });
+
+        expect(didPreview).toBe(true);
+        await expect(page.locator('[data-testid="ofive-editor-preview-mirror"]', { hasText: "External Note" })).toBeVisible();
+    });
+
+    test("holding an external ofive file over the tab strip does not render split preview", async ({ page }) => {
+        const targetStrip = page.locator(`.layout-v2-tab-section[data-tab-section-id="${MAIN_TAB_SECTION_ID}"] .layout-v2-tab-section__strip`).first();
+        const targetBounds = await targetStrip.boundingBox();
+        if (!targetBounds) {
+            throw new Error("ofive external strip drag target bounds missing");
+        }
+
+        await page.evaluate(({ x, y }) => {
+            const strip = document.elementFromPoint(x, y);
+            if (!strip) {
+                throw new Error("external strip drag target missing");
+            }
+
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData("application/x-layout-v2-ofive-file", "notes/external-drag.md");
+            dataTransfer.effectAllowed = "copy";
+            strip.dispatchEvent(new DragEvent("dragenter", {
+                bubbles: true,
+                cancelable: true,
+                clientX: x,
+                clientY: y,
+                dataTransfer,
+            }));
+            strip.dispatchEvent(new DragEvent("dragover", {
+                bubbles: true,
+                cancelable: true,
+                clientX: x,
+                clientY: y,
+                dataTransfer,
+            }));
+        }, {
+            x: targetBounds.x + targetBounds.width / 2,
+            y: targetBounds.y + targetBounds.height / 2,
+        });
+        await waitForAnimationFrames(page, 2);
+
+        await expect(page.locator('[data-layout-tab-preview-overlay="true"]')).toHaveCount(0);
+        expect(await readTabSections(page)).toEqual([
+            expect.objectContaining({
+                id: MAIN_TAB_SECTION_ID,
+                titles: ["guide.md", "tasks.md", "roadmap.canvas"],
+            }),
+        ]);
+
+        await page.evaluate(({ x, y }) => {
+            document.elementFromPoint(x, y)?.dispatchEvent(new DragEvent("dragleave", {
+                bubbles: true,
+                cancelable: true,
+                clientX: x,
+                clientY: y,
+                relatedTarget: document.body,
+            }));
+        }, {
+            x: targetBounds.x + targetBounds.width / 2,
+            y: targetBounds.y + targetBounds.height / 2,
+        });
+    });
+
     test("can open tabs through the public workbench API and activate panels imperatively", async ({ page }) => {
         await page.evaluate(() => {
             window.__LAYOUT_V2_OFIVE_API__?.openTab({
@@ -481,6 +622,6 @@ test.describe("ofive workbench layout fixture", () => {
         });
 
         await expect(page.locator(".layout-v2-tab-section__tab-title", { hasText: "api-open.md" })).toBeVisible();
-        await expect(page.locator('[data-testid="sidebar-left"] .layout-v2-panel-section__pane-title')).toHaveText("Agent Skills");
+        await expect(page.locator(activePanelPaneTitle('[data-testid="sidebar-left"]'))).toHaveText("Agent Skills");
     });
 });

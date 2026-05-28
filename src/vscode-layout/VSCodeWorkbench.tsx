@@ -446,6 +446,7 @@ function resolvePointerTabHoverTarget(params: {
 
 function resolveWorkbenchTabDragClientPointer(
     pointer: WorkbenchTabDragPointer,
+    options: { preferScreenPointer?: boolean } = {},
 ): { clientX: number; clientY: number; screenX: number; screenY: number } | null {
     const hasClientPointer = typeof pointer.clientX === "number" && typeof pointer.clientY === "number";
     const hasScreenPointer = typeof pointer.screenX === "number" && typeof pointer.screenY === "number";
@@ -460,10 +461,11 @@ function resolveWorkbenchTabDragClientPointer(
         ? window.screenY
         : (window.screenTop ?? 0);
 
-    const clientX = hasClientPointer
+    const shouldDeriveClientFromScreen = Boolean(options.preferScreenPointer && hasScreenPointer);
+    const clientX = hasClientPointer && !shouldDeriveClientFromScreen
         ? pointer.clientX!
         : pointer.screenX! - screenLeft + window.scrollX;
-    const clientY = hasClientPointer
+    const clientY = hasClientPointer && !shouldDeriveClientFromScreen
         ? pointer.clientY!
         : pointer.screenY! - screenTop + window.scrollY;
     const screenX = hasScreenPointer
@@ -583,6 +585,8 @@ export interface VSCodeWorkbenchProps {
     renderTabDragPreviewLayout?: boolean;
     /** tab 拖拽预览布局渲染模式。inline 会替换主布局；overlay 会覆盖显示预览但保留已提交布局挂载。 */
     tabDragPreviewRenderMode?: "inline" | "overlay";
+    /** 外部 tab 拖到 tab strip 时是否渲染布局预览。默认关闭，避免文件拖入 strip 时重排主 tab 闪烁。 */
+    renderExternalTabStripPreviewLayout?: boolean;
     /** 拖拽当前 active tab 时是否保留其内容挂载但隐藏。默认关闭；重型 editor 宿主可开启以避免 drag-start teardown。 */
     preserveActiveTabContentDuringDrag?: boolean;
     /** 是否在新建的 tab split preview section 中渲染真实 tab 内容。默认开启；重型 editor 宿主可关闭，仅保留预览结构和标题。 */
@@ -953,6 +957,67 @@ function areEquivalentPanelDragSessions(
     );
 }
 
+function areEquivalentActivityBarDragSessions(
+    left: ActivityBarDragSession | null,
+    right: ActivityBarDragSession | null,
+): boolean {
+    return (
+        left?.sourceBarId === right?.sourceBarId &&
+        left?.iconId === right?.iconId &&
+        left?.currentBarId === right?.currentBarId &&
+        left?.pointerId === right?.pointerId &&
+        left?.originX === right?.originX &&
+        left?.originY === right?.originY &&
+        left?.pointerX === right?.pointerX &&
+        left?.pointerY === right?.pointerY &&
+        left?.targetIndex === right?.targetIndex &&
+        left?.phase === right?.phase &&
+        left?.panelTarget?.panelSectionId === right?.panelTarget?.panelSectionId &&
+        left?.panelTarget?.targetIndex === right?.panelTarget?.targetIndex &&
+        areEquivalentPanelHoverTargets(left?.contentTarget, right?.contentTarget)
+    );
+}
+
+function isTabPreviewOverlayRenderable(
+    preview: { root: SectionNode<WorkbenchSectionData>; state: TabSectionsState } | null,
+): boolean {
+    if (!preview) {
+        return false;
+    }
+
+    let hasVisibleTabSection = false;
+    let hasEmptyTabSection = false;
+    const queue: SectionNode<WorkbenchSectionData>[] = [preview.root];
+    while (queue.length > 0) {
+        const section = queue.shift();
+        if (!section) {
+            continue;
+        }
+
+        if (section.split) {
+            queue.push(section.split.children[0], section.split.children[1]);
+            continue;
+        }
+
+        const binding = getSectionComponentBinding(section);
+        if (binding.type !== "tab-section") {
+            continue;
+        }
+
+        const tabSectionId = (binding.props as { tabSectionId?: unknown }).tabSectionId;
+        const tabSection = typeof tabSectionId === "string"
+            ? preview.state.sections[tabSectionId]
+            : null;
+        if (tabSection && tabSection.tabs.length > 0) {
+            hasVisibleTabSection = true;
+        } else {
+            hasEmptyTabSection = true;
+        }
+    }
+
+    return hasVisibleTabSection && !hasEmptyTabSection;
+}
+
 export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
     const {
         activities = [],
@@ -973,6 +1038,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         deferPanelContentPresentation,
         renderTabDragPreviewLayout = true,
         tabDragPreviewRenderMode = "inline",
+        renderExternalTabStripPreviewLayout = false,
         preserveActiveTabContentDuringDrag = false,
         renderTabContentInDragPreviewLayout = true,
         renderPanelContentInDragPreviewLayout = true,
@@ -1071,6 +1137,16 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
 
         setPanelDragSession((currentSession) => {
             if (areEquivalentPanelDragSessions(currentSession, session)) {
+                return currentSession;
+            }
+
+            return session;
+        });
+    }, []);
+
+    const handleActivityBarDragSessionChange = useCallback((session: ActivityBarDragSession | null): void => {
+        setActivityBarDragSession((currentSession) => {
+            if (areEquivalentActivityBarDragSessions(currentSession, session)) {
                 return currentSession;
             }
 
@@ -2026,7 +2102,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         payload: WorkbenchTabDragPayload,
         pointer: WorkbenchTabDragPointer,
     ): boolean => {
-        const resolvedPointer = resolveWorkbenchTabDragClientPointer(pointer);
+        const resolvedPointer = resolveWorkbenchTabDragClientPointer(pointer, {
+            preferScreenPointer: Boolean(payload.sourceWindowLabel && payload.sourceWindowLabel !== windowLabel),
+        });
         if (!resolvedPointer) {
             cancelDraggedTab({ id: payload.id });
             return false;
@@ -2073,13 +2151,15 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
             return nextSession;
         });
         return true;
-    }, [cancelDraggedTab, store, updateExternalTabDragTab]);
+    }, [cancelDraggedTab, store, updateExternalTabDragTab, windowLabel]);
 
     const dropDraggedTab = useCallback((
         payload: WorkbenchTabDragPayload,
         pointer: WorkbenchTabDragPointer,
     ): boolean => {
-        const resolvedPointer = resolveWorkbenchTabDragClientPointer(pointer);
+        const resolvedPointer = resolveWorkbenchTabDragClientPointer(pointer, {
+            preferScreenPointer: Boolean(payload.sourceWindowLabel && payload.sourceWindowLabel !== windowLabel),
+        });
         if (!resolvedPointer) {
             cancelDraggedTab({ id: payload.id });
             return false;
@@ -2115,7 +2195,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         const didCommit = commitExternalTabDragSession(tab, session, { closeExisting: true });
         clearExternalTabDrag();
         return didCommit;
-    }, [cancelDraggedTab, clearExternalTabDrag, commitExternalTabDragSession, store, tabDragSession]);
+    }, [cancelDraggedTab, clearExternalTabDrag, commitExternalTabDragSession, store, tabDragSession, windowLabel]);
 
     // --- Build panel context ---
     const buildPanelContext = useCallback((hostPanelId: string | null): WorkbenchPanelContext => ({
@@ -2139,14 +2219,23 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         () => withExternalTabDragSource(state.tabSections, externalTabDragTab, effectiveTabDragSession),
         [state.tabSections, externalTabDragTab, effectiveTabDragSession?.sourceTabSectionId, effectiveTabDragSession?.tabId],
     );
+    const shouldRenderTabDragPreviewLayout = Boolean(
+        renderTabDragPreviewLayout &&
+        (
+            renderExternalTabStripPreviewLayout ||
+            !isExternalTabDragSession(effectiveTabDragSession) ||
+            effectiveTabDragSession?.hoverTarget?.area !== "strip"
+        ),
+    );
     const tabPreview = useMemo(
-        () => renderTabDragPreviewLayout
+        () => shouldRenderTabDragPreviewLayout
             ? buildTabWorkbenchPreviewState(layoutRoot, tabSectionsForTabPreview, effectiveTabDragSession, workbenchTabAdapter)
             : null,
         // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when phase/hoverTarget changes, not on every pointer move
-        [renderTabDragPreviewLayout, layoutRoot, tabSectionsForTabPreview, effectiveTabDragSession?.phase, effectiveTabDragSession?.hoverTarget],
+        [shouldRenderTabDragPreviewLayout, layoutRoot, tabSectionsForTabPreview, effectiveTabDragSession?.phase, effectiveTabDragSession?.hoverTarget],
     );
-    const shouldRenderTabPreviewOverlay = Boolean(tabPreview && tabDragPreviewRenderMode === "overlay");
+    const shouldRenderTabPreviewOverlay = tabDragPreviewRenderMode === "overlay"
+        && isTabPreviewOverlayRenderable(tabPreview);
     const shouldRenderInlineTabPreview = !shouldRenderTabPreviewOverlay;
     const tabPreviewedRoot = shouldRenderInlineTabPreview ? tabPreview?.root ?? layoutRoot : layoutRoot;
     const renderedTabSections = shouldRenderInlineTabPreview ? tabPreview?.state ?? state.tabSections : state.tabSections;
@@ -2344,9 +2433,9 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                             <span style={{ fontSize: 14, fontWeight: 600 }}>{icon.symbol}</span>
                         );
                     }}
-                    onDragSessionChange={setActivityBarDragSession}
+                    onDragSessionChange={handleActivityBarDragSessionChange}
                     onDragSessionEnd={(session) => {
-                        setActivityBarDragSession(null);
+                        handleActivityBarDragSessionChange(null);
                         const notifyActivityBarsChanged = (): void => {
                             onActivityBarsChange?.(store.getState().activityBars);
                         };
@@ -2482,7 +2571,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                             panelSections: committed.state,
                         });
                     }}
-                    onActivityDragSessionChange={setActivityBarDragSession}
+                    onActivityDragSessionChange={handleActivityBarDragSessionChange}
                     onActivatePanel={(panelId) => activatePanelById(panelId)}
                     onFocusPanel={(panelId) => {
                         focusPanelWithLayout(section.id, panelSectionProps.panelSectionId, panelId);
@@ -2607,6 +2696,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         onSelectActivity,
         onActivityBarsChange,
         activatePanelById,
+        handleActivityBarDragSessionChange,
         openTab,
         closeTab,
         moveWorkbenchTab,
