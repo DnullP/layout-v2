@@ -830,6 +830,11 @@ export function TabSection(props: {
 
                     onFocusTab(tab.id);
                     event.preventDefault();
+                    try {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    } catch {
+                      /* pointer capture is best-effort across embedded webviews */
+                    }
                     updateDragSession(buildTabSectionDragSession({
                       leafSectionId,
                       tabSectionId: tabSection.id,

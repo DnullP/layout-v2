@@ -60,6 +60,30 @@ export interface WorkbenchTabDefinition {
 }
 
 /**
+ * Workbench tab 跨容器拖拽载荷。
+ */
+export interface WorkbenchTabDragPayload extends WorkbenchTabDefinition {
+    /** 源 workbench 实例，由宿主提供。 */
+    sourceWorkbenchId?: string | null;
+    /** 源窗口标识，由宿主提供。 */
+    sourceWindowLabel?: string | null;
+    /** 原始 tab section，供源窗口最终关闭原 tab。 */
+    sourceTabSectionId?: string | null;
+    /** 原始 leaf section，供调试和宿主策略使用。 */
+    sourceLeafSectionId?: string | null;
+}
+
+/**
+ * 跨 workbench tab 拖拽指针位置。
+ */
+export interface WorkbenchTabDragPointer {
+    clientX?: number;
+    clientY?: number;
+    screenX?: number;
+    screenY?: number;
+}
+
+/**
  * Tab component 的 API 接口，由 workbench 提供给 tab 渲染器。
  */
 export interface WorkbenchTabApi {
@@ -108,6 +132,14 @@ export interface WorkbenchApi {
     updateTab: (tabId: string, updates: Partial<WorkbenchTabDefinition>) => void;
     /** 关闭 tab。 */
     closeTab: (tabId: string) => void;
+    /** 导入一个来自其他 workbench/window 的 tab，并复用本地 split/drop 提交流程。 */
+    importDraggedTab: (payload: WorkbenchTabDragPayload, options?: { closeExisting?: boolean }) => void;
+    /** 预览一个来自其他 workbench/window 的 tab 拖拽。 */
+    previewDraggedTab: (payload: WorkbenchTabDragPayload, pointer: WorkbenchTabDragPointer) => boolean;
+    /** 提交一个来自其他 workbench/window 的 tab 拖拽落点。 */
+    dropDraggedTab: (payload: WorkbenchTabDragPayload, pointer: WorkbenchTabDragPointer) => boolean;
+    /** 取消一个来自其他 workbench/window 的 tab 拖拽预览。 */
+    cancelDraggedTab: (payload?: Pick<WorkbenchTabDragPayload, "id">) => void;
     /** 设置活跃 tab。 */
     setActiveTab: (tabId: string) => void;
     /** 激活指定 panel。 */

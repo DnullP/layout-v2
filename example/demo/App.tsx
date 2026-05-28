@@ -5,10 +5,14 @@
  */
 
 import { type ReactNode } from "react";
-import { SectionLayoutViewUsageExample, VSCodeWorkbenchOverlayUsageExample } from "../usage";
+import { OfiveWorkbenchUsageExample, SectionLayoutViewUsageExample, VSCodeWorkbenchOverlayUsageExample } from "../usage";
 
 export function App(): ReactNode {
     const params = new URLSearchParams(window.location.search);
+    if (params.get("surface") === "ofive-workbench") {
+        return <OfiveWorkbenchUsageExample />;
+    }
+
     if (params.get("surface") === "vscode-workbench-overlay") {
         return <VSCodeWorkbenchOverlayUsageExample />;
     }

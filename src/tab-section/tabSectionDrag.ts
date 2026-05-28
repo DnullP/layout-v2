@@ -50,6 +50,7 @@ export interface TabSectionDragSession {
     pointerY: number;
     phase: "pending" | "dragging";
     hoverTarget: TabSectionHoverTarget | null;
+    payload?: unknown;
 }
 
 export function advanceTabSectionDragSessionPointer(

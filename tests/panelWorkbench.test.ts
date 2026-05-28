@@ -22,11 +22,13 @@ import {
   WORKBENCH_RIGHT_PANEL_SECTION_ID,
   type SectionComponentData,
   type SectionDraft,
+  type SectionNode,
   type WorkbenchSectionData,
   type PanelSectionDragSession,
   type PanelSectionHoverTarget,
   type WorkbenchActivityDefinition,
   type WorkbenchPanelDefinition,
+  type WorkbenchPanelLayoutSnapshot,
 } from "../src";
 import {
   PANEL_SECTION_COLLAPSED_BAR_SIZE,
@@ -1201,7 +1203,7 @@ describe("workbench panel layout snapshot persistence", () => {
     const leftSidebar = workbenchShell?.split?.children[0];
     expect(leftSidebar?.id).toBe("left-sidebar");
 
-    const pollutedSnapshot = {
+    const pollutedSnapshot: WorkbenchPanelLayoutSnapshot = {
       ...snapshot,
       root: {
         ...snapshot.root,
@@ -1221,11 +1223,11 @@ describe("workbench panel layout snapshot persistence", () => {
                             meta: { "layout-v2:fixedSize": 86 },
                           },
                           snapshot.root.split.children[1].split.children[1],
-                        ],
+                        ] as [SectionNode<WorkbenchSectionData>, SectionNode<WorkbenchSectionData>],
                       }
                     : null,
                 },
-              ],
+              ] as [SectionNode<WorkbenchSectionData>, SectionNode<WorkbenchSectionData>],
             }
           : null,
       },

@@ -62,7 +62,30 @@ function createWorkbenchSectionDraft(
     };
 }
 
-export function createWorkbenchRootLayout(hasRightSidebar: boolean): SectionNode<WorkbenchSectionData> {
+export interface CreateWorkbenchRootLayoutOptions {
+    hasRightSidebar?: boolean;
+    mainOnly?: boolean;
+}
+
+export function createWorkbenchRootLayout(
+    hasRightSidebarOrOptions: boolean | CreateWorkbenchRootLayoutOptions = false,
+): SectionNode<WorkbenchSectionData> {
+    const options = typeof hasRightSidebarOrOptions === "boolean"
+        ? { hasRightSidebar: hasRightSidebarOrOptions, mainOnly: false }
+        : hasRightSidebarOrOptions;
+    const hasRightSidebar = options.hasRightSidebar ?? false;
+
+    if (options.mainOnly) {
+        return createRootSection(
+            createWorkbenchSectionDraft(
+                "main-tabs",
+                "Main Tabs",
+                "main",
+                createSectionComponentBinding("tab-section", { tabSectionId: WORKBENCH_MAIN_TAB_SECTION_ID }),
+            ),
+        );
+    }
+
     let root = createRootSection(
         createWorkbenchSectionDraft(
             "root",
@@ -269,6 +292,7 @@ export interface CreateWorkbenchLayoutOptions {
     panels?: WorkbenchPanelDefinition[];
     initialTabs?: WorkbenchTabDefinition[];
     hasRightSidebar?: boolean;
+    mainOnly?: boolean;
     initialSidebarState?: {
         left?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
         right?: { visible?: boolean; activeActivityId?: string | null; activePanelId?: string | null };
@@ -814,6 +838,7 @@ export function createWorkbenchLayoutState(
         panels = [],
         initialTabs = [],
         hasRightSidebar = false,
+        mainOnly = false,
         initialSidebarState,
     } = options;
 
@@ -825,9 +850,11 @@ export function createWorkbenchLayoutState(
     const rightSidebarVisible = initialSidebarState?.right?.visible ?? true;
 
     const mainTabs = buildWorkbenchTabs(initialTabs);
-    let root = createWorkbenchRootLayout(hasRightSidebar);
-    root = setSectionHidden(root, "left-sidebar", !leftSidebarVisible);
-    if (hasRightSidebar) {
+    let root = createWorkbenchRootLayout({ hasRightSidebar, mainOnly });
+    if (!mainOnly) {
+        root = setSectionHidden(root, "left-sidebar", !leftSidebarVisible);
+    }
+    if (!mainOnly && hasRightSidebar) {
         root = setSectionHidden(root, "right-sidebar", !rightSidebarVisible);
     }
 

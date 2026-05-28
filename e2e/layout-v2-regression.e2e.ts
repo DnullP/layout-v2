@@ -683,7 +683,7 @@ test.describe("layout-v2 regressions", () => {
         expect(committedPanelTitles).toContain("Problems");
     });
 
-    test("collapsing a panel section should reclaim layout space while keeping the panel bar interactive", async ({ page }) => {
+    test("collapsing a horizontal panel section should preserve width while keeping the panel bar interactive", async ({ page }) => {
         await gotoLayoutV2Example(page);
 
         const rightPanel = page.locator('.layout-v2-panel-section[data-panel-section-id="right-panel"]');
@@ -709,8 +709,8 @@ test.describe("layout-v2 regressions", () => {
 
         await expect(content).toHaveClass(/layout-v2-panel-section__content--collapsed/);
         await expect(problemsTab).toBeVisible();
-        expect(collapsedPanelBox.width).toBeLessThan(expandedPanelBox.width - 80);
-        expect(collapsedMainBox.width).toBeGreaterThan(expandedMainBox.width + 80);
+        expect(Math.abs(collapsedPanelBox.width - expandedPanelBox.width)).toBeLessThan(2);
+        expect(Math.abs(collapsedMainBox.width - expandedMainBox.width)).toBeLessThan(2);
 
         await problemsTab.click();
         await waitForAnimationFrames(page, 2);
@@ -722,7 +722,7 @@ test.describe("layout-v2 regressions", () => {
 
         await expect(content).not.toHaveClass(/layout-v2-panel-section__content--collapsed/);
         await expect(rightPanel.locator('.layout-v2-panel-section__pane-title')).toHaveText('Problems');
-        expect(reexpandedPanelBox.width).toBeGreaterThan(collapsedPanelBox.width + 80);
+        expect(Math.abs(reexpandedPanelBox.width - collapsedPanelBox.width)).toBeLessThan(2);
     });
 
     test("dragging the middle section tab to the lower content right edge should create a lower right split", async ({ page }) => {

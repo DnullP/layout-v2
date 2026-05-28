@@ -46,3 +46,147 @@ body {
 button {
     font: inherit;
 }
+
+.ofive-workbench-fixture {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    background: #171b20;
+}
+
+.ofive-workbench-fixture__layout {
+    width: 100%;
+    height: 100%;
+}
+
+.ofive-workbench-fixture__file-source {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 100;
+    max-width: 180px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 6px;
+    background: #262c35;
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1;
+    cursor: grab;
+    user-select: none;
+}
+
+.ofive-workbench-fixture__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.ofive-workbench-fixture__panel-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 14px;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.ofive-workbench-fixture__panel-kicker {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.ofive-workbench-fixture__panel-content button,
+.ofive-workbench-fixture__tab button {
+    width: fit-content;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 5px;
+    background: #2f6fed;
+    color: white;
+    cursor: pointer;
+}
+
+.ofive-workbench-fixture__tab {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 18px;
+    overflow: hidden;
+    background: #1b2027;
+    color: var(--text-primary);
+}
+
+.ofive-workbench-fixture__tab header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.ofive-workbench-fixture__tab h2 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.2;
+}
+
+.ofive-workbench-fixture__tab p {
+    margin: 0;
+    max-width: 520px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.ofive-workbench-fixture__tab pre {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #cdd6e3;
+    text-overflow: ellipsis;
+}
+
+.ofive-workbench-fixture__canvas-preview {
+    width: min(320px, 100%);
+    height: 160px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 6px;
+    background:
+        linear-gradient(90deg, transparent 23px, rgba(255, 255, 255, 0.08) 24px),
+        linear-gradient(transparent 23px, rgba(255, 255, 255, 0.08) 24px),
+        #222933;
+    background-size: 24px 24px;
+}
+
+.ofive-workbench-fixture__preview-mirror {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 16px;
+    background: #1b2027;
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.ofive-workbench-fixture__preview-mirror span {
+    color: var(--text-secondary);
+}

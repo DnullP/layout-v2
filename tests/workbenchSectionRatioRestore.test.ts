@@ -17,8 +17,8 @@ function createLeftSidebarPanelSplitSnapshot(): WorkbenchPanelLayoutSnapshot {
             { id: "backlinks", label: "Backlinks", activityId: "backlinks", position: "right" },
         ],
         activities: [
-            { id: "files", label: "Files", bar: "left", type: "panel-container" },
-            { id: "backlinks", label: "Backlinks", bar: "right", type: "panel-container" },
+            { id: "files", label: "Files", bar: "left" },
+            { id: "backlinks", label: "Backlinks", bar: "right" },
         ],
         hasRightSidebar: true,
     });
@@ -79,8 +79,8 @@ describe("applyPersistedSectionRatios", () => {
                     { id: "backlinks", label: "Backlinks", activityId: "backlinks", position: "right" },
                 ],
                 activities: [
-                    { id: "files", label: "Files", bar: "left", type: "panel-container" },
-                    { id: "backlinks", label: "Backlinks", bar: "right", type: "panel-container" },
+                    { id: "files", label: "Files", bar: "left" },
+                    { id: "backlinks", label: "Backlinks", bar: "right" },
                 ],
                 hasRightSidebar: true,
             }),

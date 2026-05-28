@@ -25,6 +25,8 @@ export type {
     WorkbenchPanelContext,
     WorkbenchApi,
     WorkbenchSidebarState,
+    WorkbenchTabDragPayload,
+    WorkbenchTabDragPointer,
 } from "./workbenchTypes";
 export {
     createWorkbenchLayoutState,

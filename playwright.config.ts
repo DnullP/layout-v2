@@ -16,6 +16,7 @@ export default defineConfig({
     headless: true,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
+    bypassCSP: true,
   },
   projects: [
     {
@@ -25,7 +26,24 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev",
-    url: "http://127.0.0.1:4175",
+    port: 4175,
+    env: {
+      ...process.env,
+      NO_PROXY: [
+        process.env.NO_PROXY,
+        process.env.no_proxy,
+        "127.0.0.1",
+        "localhost",
+        "::1",
+      ].filter(Boolean).join(","),
+      no_proxy: [
+        process.env.NO_PROXY,
+        process.env.no_proxy,
+        "127.0.0.1",
+        "localhost",
+        "::1",
+      ].filter(Boolean).join(","),
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
