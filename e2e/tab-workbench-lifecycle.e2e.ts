@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const LAYOUT_V2_EXAMPLE_URL = "/";
+const LAYOUT_V2_EXAMPLE_URL = "/?surface=section-layout";
 const LAYOUT_V2_SPLIT_ANIMATION_WAIT_MS = 320;
 const TAB_WELCOME = "Welcome";
 const TAB_REVIEW = "Review";

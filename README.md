@@ -21,8 +21,8 @@ Independent React layout engine extracted from `ofive`.
 
 - `src/index.ts`: 包根入口，转发 `vscode-layout` 公共接口
 - `src/vscode-layout/`: VSCode 风格布局引擎实际实现目录
-- `src/example/`: 示例与演示代码
-- `src/example/demo/`: 本地开发时运行的 demo 应用入口
+- `example/usage/`: 示例与回归测试 fixture
+- `example/demo/`: 本地开发与 Vercel 部署使用的 demo 应用入口
 
 `main`、`App` 和 demo 主题样式都只服务于仓库内示例，不应被外部应用当作引擎接口使用。
 
@@ -34,6 +34,22 @@ npm run dev
 ```
 
 The demo app runs on `http://127.0.0.1:4175`.
+
+## Vercel Demo
+
+The root demo page is a static Vite app with multiple ready-made workbench scenarios.
+
+```bash
+npm run build:demo
+npm run preview:demo
+```
+
+Vercel can deploy this repository directly with:
+
+- Build command: `npm run build:demo`
+- Output directory: `demo-dist`
+
+The included `vercel.json` already sets these values.
 
 ## Build
 

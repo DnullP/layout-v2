@@ -47,6 +47,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4175 --strictPort",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && vite build",
+    "build:demo": "tsc -p tsconfig.demo.json && vite build --config vite.demo.config.ts",
+    "preview:demo": "vite preview --host 127.0.0.1 --port 4176 --strictPort --outDir demo-dist",
     "prepare": "npm run build",
     "test": "bun test",
     "test:e2e": "bunx playwright test --config playwright.config.ts --reporter=line"

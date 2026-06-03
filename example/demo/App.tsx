@@ -6,9 +6,14 @@
 
 import { type ReactNode } from "react";
 import { OfiveWorkbenchUsageExample, SectionLayoutViewUsageExample, VSCodeWorkbenchOverlayUsageExample } from "../usage";
+import { DemoScenarios } from "./DemoScenarios";
 
 export function App(): ReactNode {
     const params = new URLSearchParams(window.location.search);
+    if (params.get("surface") === "section-layout") {
+        return <SectionLayoutViewUsageExample />;
+    }
+
     if (params.get("surface") === "ofive-workbench") {
         return <OfiveWorkbenchUsageExample />;
     }
@@ -17,7 +22,7 @@ export function App(): ReactNode {
         return <VSCodeWorkbenchOverlayUsageExample />;
     }
 
-    return <SectionLayoutViewUsageExample />;
+    return <DemoScenarios />;
 }
 
 export default App;
