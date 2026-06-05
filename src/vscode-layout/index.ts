@@ -53,6 +53,15 @@ export {
     type WorkbenchPanelSectionLayoutSnapshot,
     type CreateWorkbenchLayoutOptions,
 } from "./workbenchPreset";
+export {
+    createWorkbenchRegistry,
+    type WorkbenchActivityContribution,
+    type WorkbenchPanelContribution,
+    type WorkbenchRegistry,
+    type WorkbenchRegistrySnapshot,
+    type WorkbenchTabComponentContribution,
+    type WorkbenchTabRenderer,
+} from "./workbenchRegistry";
 
 // --- 中层 API：Store / Section / 组件 ---
 export * from "../section";

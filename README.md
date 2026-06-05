@@ -144,6 +144,39 @@ The public facade exposes three kinds of capability:
 - `createVSCodeLayoutStore(...)` for subscribing to and mutating the snapshot
 - `useVSCodeLayoutStoreState(...)` for consuming the store inside React
 
+For host apps that want a thinner integration layer, `createWorkbenchRegistry()` owns the generic registration boundary for activities, panels, and tab renderers. The host still owns business data and side effects; the registry only handles ordering, snapshots, subscriptions, and projection into `VSCodeWorkbench` props.
+
+```tsx
+import { VSCodeWorkbench, createWorkbenchRegistry } from "layout-v2";
+
+const registry = createWorkbenchRegistry();
+
+registry.registerActivity({ id: "collections", label: "Collections", bar: "left" });
+registry.registerPanel({
+	id: "collections-panel",
+	label: "Collections",
+	activityId: "collections",
+	position: "left",
+	render: (context) => <CollectionsPanel context={context} />,
+});
+registry.registerTabComponent({
+	id: "request-editor",
+	render: ({ params, api }) => <RequestEditor params={params} api={api} />,
+});
+
+function WorkbenchShell() {
+	return (
+		<VSCodeWorkbench
+			activities={registry.useActivityDefinitions()}
+			panels={registry.usePanelDefinitions()}
+			tabComponents={registry.useTabComponentRenderers()}
+			renderPanelContent={(panelId, context) =>
+				registry.getPanelById(panelId)?.render(context) ?? null}
+		/>
+	);
+}
+```
+
 For hosts that need real tab workbench behavior instead of demo-only glue code, `layout-v2` now also exposes tab workbench helpers that turn `TabSectionDragSession` into reusable preview and commit state transitions:
 
 ```ts
