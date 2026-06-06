@@ -60,6 +60,10 @@ interface SplitAnimationSnapshot {
 }
 
 const SPLIT_ANIMATION_DURATION_MS = 0;
+const LAYOUT_RESIZING_ATTR = "data-layout-resizing";
+const LAYOUT_LIGHTWEIGHT_ATTR = "data-layout-lightweight";
+const LAYOUT_LIGHTWEIGHT_SETTLE_MS = 240;
+let layoutLightweightReleaseTimer: number | null = null;
 
 interface SplitDividerProps {
     direction: SectionSplitDirection;
@@ -68,6 +72,14 @@ interface SplitDividerProps {
     onResize: (ratio: number) => void;
     resizeStrategy: SectionResizeStrategy;
     disabled?: boolean;
+}
+
+function setFlexIfChanged(element: HTMLElement, nextFlex: string): void {
+    if (element.style.flex === nextFlex) {
+        return;
+    }
+
+    element.style.flex = nextFlex;
 }
 
 function clampRatioByContainer(
@@ -117,13 +129,13 @@ function applyDomFlexResizeRatio(
     if (typeof totalSize === "number" && Number.isFinite(totalSize) && totalSize > 0) {
         const firstBasis = Math.round(ratio * totalSize * 10) / 10;
         const secondBasis = Math.round((totalSize - firstBasis) * 10) / 10;
-        slots.firstSlot.style.flex = `0 0 ${firstBasis}px`;
-        slots.secondSlot.style.flex = `0 0 ${secondBasis}px`;
+        setFlexIfChanged(slots.firstSlot, `0 0 ${firstBasis}px`);
+        setFlexIfChanged(slots.secondSlot, `0 0 ${secondBasis}px`);
         return;
     }
 
-    slots.firstSlot.style.flex = `0 0 ${ratio * 100}%`;
-    slots.secondSlot.style.flex = `0 0 ${(1 - ratio) * 100}%`;
+    setFlexIfChanged(slots.firstSlot, `0 0 ${ratio * 100}%`);
+    setFlexIfChanged(slots.secondSlot, `0 0 ${(1 - ratio) * 100}%`);
 }
 
 function findSectionNodeById<T>(
@@ -266,8 +278,14 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
             ? resolveDomFlexResizeSlots(dividerRef.current)
             : null;
 
+        if (layoutLightweightReleaseTimer !== null) {
+            window.clearTimeout(layoutLightweightReleaseTimer);
+            layoutLightweightReleaseTimer = null;
+        }
+
         setIsDragging(true);
-        document.documentElement.setAttribute("data-layout-resizing", "true");
+        document.documentElement.setAttribute(LAYOUT_RESIZING_ATTR, "true");
+        document.documentElement.setAttribute(LAYOUT_LIGHTWEIGHT_ATTR, "true");
 
         let rafId: number | null = null;
         let lastPointer = startPointer;
@@ -315,7 +333,11 @@ function SplitDivider(props: SplitDividerProps): ReactNode {
             onResize(finalRatio);
 
             setIsDragging(false);
-            document.documentElement.removeAttribute("data-layout-resizing");
+            document.documentElement.removeAttribute(LAYOUT_RESIZING_ATTR);
+            layoutLightweightReleaseTimer = window.setTimeout(() => {
+                layoutLightweightReleaseTimer = null;
+                document.documentElement.removeAttribute(LAYOUT_LIGHTWEIGHT_ATTR);
+            }, LAYOUT_LIGHTWEIGHT_SETTLE_MS);
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", finishResize);
             window.removeEventListener("pointercancel", finishResize);

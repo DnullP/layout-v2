@@ -173,6 +173,8 @@
   opacity: 0;
   pointer-events: none;
   z-index: 0;
+  content-visibility: hidden;
+  contain-intrinsic-size: 640px 480px;
 }
 
 /* pending card：已挂载等待内部组件 ready 的 tab 内容，保持可测量但不可见。 */
@@ -245,6 +247,30 @@
   border-radius: 14px;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+}
+
+:root[data-layout-lightweight] .layout-v2-tab-section__card--active {
+  contain: layout style paint;
+}
+
+:root[data-layout-lightweight] .layout-v2-tab-section {
+  background: var(--bg-primary);
+}
+
+:root[data-layout-lightweight] .layout-v2-tab-section__strip,
+:root[data-layout-lightweight] .layout-v2-tab-section__tab {
+  background: var(--chrome-tabstrip-bg);
+  box-shadow: none;
+}
+
+:root[data-layout-lightweight] .layout-v2-tab-section__content {
+  background: transparent;
+}
+
+:root[data-layout-lightweight] .layout-v2-tab-section__card {
+  border-radius: 0;
+  background: var(--bg-primary);
+  box-shadow: none;
 }
 
 /* tab 拖拽预览根节点：跟随鼠标显示，不参与真实布局命中。 */

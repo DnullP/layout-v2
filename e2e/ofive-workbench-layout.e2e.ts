@@ -382,8 +382,20 @@ test.describe("ofive workbench layout fixture", () => {
         await page.mouse.down();
         await page.mouse.move(dividerBox.x + dividerBox.width / 2 + 72, dividerBox.y + dividerBox.height / 2, { steps: 8 });
         await waitForAnimationFrames(page, 2);
+        await expect(page.locator("html[data-layout-resizing='true']")).toHaveCount(1);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(1);
+        await expect.poll(async () => page.locator(".layout-v2__child-slot-inner").first().evaluate((element) => {
+            return window.getComputedStyle(element).pointerEvents;
+        })).toBe("none");
+        await expect.poll(async () => divider.evaluate((element) => {
+            return window.getComputedStyle(element).pointerEvents;
+        })).not.toBe("none");
         await page.mouse.up();
         await waitForAnimationFrames(page, 2);
+        await expect(page.locator("html[data-layout-resizing='true']")).toHaveCount(0);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(1);
+        await page.waitForTimeout(320);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(0);
 
         const mainAfter = await page.locator(`.layout-v2-tab-section[data-tab-section-id="${MAIN_TAB_SECTION_ID}"]`).boundingBox();
         if (!mainAfter) {

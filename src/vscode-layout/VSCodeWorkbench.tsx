@@ -90,8 +90,10 @@ import {
 } from "./workbenchPreset";
 import type { ActivityBarFocusBridge } from "./focusBridge";
 import type { PanelSectionFocusBridge } from "./focusBridge";
+import type { TabSectionFocusBridge } from "./focusBridge";
 import type { ActivityBarStateItem } from "../activity-bar/activityBarModel";
 import type { PanelSectionStateItem, PanelSectionPanelDefinition } from "../panel-section/panelSectionModel";
+import type { TabSectionStateItem } from "../tab-section/tabSectionModel";
 import type {
     WorkbenchActivityDefinition,
     WorkbenchApi,
@@ -2404,6 +2406,16 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         }),
     }), []);
 
+    const activeTabGroupId = state.workbench?.activeGroupId ?? null;
+    const tabSectionFocusBridge = useMemo((): TabSectionFocusBridge<TabSectionStateItem, TabSectionTabDefinition> => ({
+        getSectionAttributes: (section) => ({
+            "data-layout-active-tab-group": section.id === activeTabGroupId ? "true" : "false",
+        }),
+        getContentAttributes: (section) => ({
+            "data-layout-active-tab-group": section.id === activeTabGroupId ? "true" : "false",
+        }),
+    }), [activeTabGroupId]);
+
     const registry = useMemo(() => createSectionComponentRegistry<WorkbenchSectionData>({
         empty: ({ binding }) => {
             const p = binding.props as { label: string; description: string };
@@ -2656,6 +2668,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
                         );
                     }}
                     renderInactiveTabContent={renderInactiveTabContent}
+                    focusBridge={tabSectionFocusBridge}
                     deferTabContentPresentation={deferTabContentPresentation}
                     isTabContentReady={(tab) => readyTabContentIds.has(tab.id)}
                     preserveActiveTabContentDuringDrag={preserveActiveTabContentDuringDrag}
@@ -2709,6 +2722,7 @@ export function VSCodeWorkbench(props: VSCodeWorkbenchProps): ReactNode {
         leftActivityFocusBridge,
         leftPanelFocusBridge,
         rightPanelFocusBridge,
+        tabSectionFocusBridge,
     ]);
 
     const renderTabPreviewOverlaySection = useCallback((section: SectionNode<WorkbenchSectionData>): ReactNode => {

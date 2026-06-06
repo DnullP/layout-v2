@@ -961,8 +961,17 @@ test.describe("layout-v2 regressions", () => {
         await page.mouse.down();
         await page.mouse.move(box.x + box.width / 2 + 72, box.y + box.height / 2, { steps: 8 });
         await waitForAnimationFrames(page, 2);
+        await expect(page.locator("html[data-layout-resizing='true']")).toHaveCount(1);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(1);
+        await expect.poll(async () => page.locator(".layout-v2__child-slot-inner").first().evaluate((element) => {
+            return window.getComputedStyle(element).pointerEvents;
+        })).toBe("none");
         await page.mouse.up();
         await waitForAnimationFrames(page, 2);
+        await expect(page.locator("html[data-layout-resizing='true']")).toHaveCount(0);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(1);
+        await page.waitForTimeout(320);
+        await expect(page.locator("html[data-layout-lightweight='true']")).toHaveCount(0);
 
         const after = await readOverlayExampleCallbackCounts(page);
         expect(after.sectionRatio).toBeGreaterThan(before.sectionRatio);

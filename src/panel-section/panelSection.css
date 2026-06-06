@@ -209,6 +209,8 @@
     opacity: 0;
     pointer-events: none;
     z-index: 0;
+    content-visibility: hidden;
+    contain-intrinsic-size: 320px 480px;
 }
 
 /* pending pane：等待内部组件完成首开 ready 的 panel 内容。 */
@@ -234,6 +236,22 @@
 
 .layout-v2-panel-section__pane--red {
     background: linear-gradient(180deg, rgba(201, 79, 79, 0.12), color-mix(in srgb, var(--bg-secondary) 92%, white));
+}
+
+:root[data-layout-lightweight] .layout-v2-panel-section__pane--active {
+    contain: layout style paint;
+}
+
+:root[data-layout-lightweight] .layout-v2-panel-section,
+:root[data-layout-lightweight] .layout-v2-panel-section__bar {
+    background: var(--bg-primary);
+    box-shadow: none;
+}
+
+:root[data-layout-lightweight] .layout-v2-panel-section__pane {
+    border-radius: 0;
+    background: var(--bg-primary);
+    box-shadow: none;
 }
 
 .layout-v2-panel-section__pane-header {

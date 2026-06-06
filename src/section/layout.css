@@ -50,6 +50,15 @@
     display: flex;
 }
 
+:root[data-layout-resizing] .layout-v2__child-slot-inner,
+:root[data-layout-resizing] .layout-v2__leaf-content {
+    pointer-events: none;
+}
+
+:root[data-layout-resizing] .layout-v2__divider--dragging {
+    pointer-events: auto;
+}
+
 .layout-v2__child-slot-inner--new {
 }
 
